@@ -12,6 +12,13 @@
 
   <ItemGroup>
     <PackageReference Include="NAudio.Wasapi" Version="3.3.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- For the `coord` harness: real adapters + ConnectionCoordinator. -->
+    <ProjectReference Include="..\..\src\DualAudio.Platform.Windows\DualAudio.Platform.Windows.csproj" />
   </ItemGroup>
 
 </Project>

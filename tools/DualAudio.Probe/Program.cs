@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using DualAudio.Platform.Windows.Bluetooth;
 using Windows.Devices.Enumeration;
 using Windows.Devices.Radios;
 using Windows.Foundation.Metadata;
@@ -9,12 +10,18 @@ namespace DualAudio.Probe;
 
 internal static class Program
 {
-    private static async Task<int> Main()
+    private static async Task<int> Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
         using var log = ProbeLog.CreateNextToExe();
         try
         {
+            // "coord": ConnectionCoordinator wired to the real Platform.Windows adapters (end-to-end, no UI).
+            if (args.Length > 0 && args[0].Equals("coord", StringComparison.OrdinalIgnoreCase))
+            {
+                return await CoordHarness.RunAsync(log, args.Skip(1).ToArray());
+            }
+
             await using var probe = new Probe(log);
             return await probe.RunAsync();
         }
@@ -43,6 +50,9 @@ internal sealed class Probe : IAsyncDisposable
     // Devices reported by the watcher, in "Added" order. Guarded by _devicesLock.
     private readonly object _devicesLock = new();
     private readonly List<DeviceInformation> _devices = [];
+
+    // Display names resolved from the parent Bluetooth device, by device Id. Guarded by _devicesLock.
+    private readonly Dictionary<string, ResolvedDeviceName> _names = new(StringComparer.OrdinalIgnoreCase);
 
     // The single active connection. Guarded by _connLock (async lock).
     private readonly SemaphoreSlim _connLock = new(1, 1);
@@ -176,7 +186,7 @@ internal sealed class Probe : IAsyncDisposable
         {
             try
             {
-                _watcher = DeviceInformation.CreateWatcher(selector, [IsConnectedKey]);
+                _watcher = DeviceInformation.CreateWatcher(selector, [IsConnectedKey, .. BluetoothDeviceNameResolver.InterfaceProperties]);
             }
             catch (Exception ex)
             {
@@ -214,8 +224,24 @@ internal sealed class Probe : IAsyncDisposable
                 text = Describe(_devices.Count - 1, info);
             }
             _log.Info($"Watcher Added:   {text}");
+            _ = ResolveNameAsync(info);
         }
         catch (Exception ex) { _log.Exception("Watcher.Added handler", ex); }
+    }
+
+    private async Task ResolveNameAsync(DeviceInformation info)
+    {
+        try
+        {
+            var resolved = await BluetoothDeviceNameResolver.ResolveAsync(info, _quit.Token);
+            lock (_devicesLock) _names[info.Id] = resolved;
+            if (resolved.Source == DeviceNameSource.BluetoothDevice)
+                _log.Info($"Name for Id={Redact.ShortId(info.Id)}: \"{resolved.Name}\" from Bluetooth device (interface reported \"{info.Name}\")");
+            else
+                _log.Warn($"Name for Id={Redact.ShortId(info.Id)}: \"{resolved.Name}\" from A2DP interface ({resolved.Reason})");
+        }
+        catch (OperationCanceledException) { /* quitting */ }
+        catch (Exception ex) { _log.Exception("Resolve device name", ex); }
     }
 
     private void OnDeviceUpdated(DeviceWatcher sender, DeviceInformationUpdate update)
@@ -307,12 +333,16 @@ internal sealed class Probe : IAsyncDisposable
         catch (Exception ex) { _log.Exception("Watcher.Stopped handler", ex); }
     }
 
-    private static string Describe(int index, DeviceInformation info)
+    /// <summary>Caller must hold _devicesLock.</summary>
+    private string Describe(int index, DeviceInformation info)
     {
         var connected = info.Properties.TryGetValue(IsConnectedKey, out var value) && value is not null
             ? value.ToString()
             : "n/a";
-        return $"[{index}] Name=\"{info.Name}\" Id={Redact.ShortId(info.Id)} IsEnabled={info.IsEnabled} IsConnected={connected}";
+        var name = _names.TryGetValue(info.Id, out var resolved)
+            ? $"Name=\"{resolved.Name}\" (from {(resolved.Source == DeviceNameSource.BluetoothDevice ? "Bluetooth device" : "A2DP interface")}; interface Name=\"{info.Name}\")"
+            : $"Name=\"{info.Name}\" (from A2DP interface; lookup pending)";
+        return $"[{index}] {name} Id={Redact.ShortId(info.Id)} IsEnabled={info.IsEnabled} IsConnected={connected}";
     }
 
     // ---------------------------------------------------------------- 4. Commands
@@ -334,6 +364,8 @@ internal sealed class Probe : IAsyncDisposable
           mute <i> on|off    mute/unmute session [i] from the last listing ONLY
 
           quit              dispose everything and exit (Ctrl+C also works)
+
+        End-to-end coordinator harness (real adapters): restart as  DualAudio.Probe coord [phone-name]
 
         """);
 
@@ -398,6 +430,7 @@ internal sealed class Probe : IAsyncDisposable
                         break;
                     case "quit" or "exit" or "q": return;
                     case "help" or "?": PrintHelp(); break;
+                    case "coord": _log.Warn("Run the harness as its own process: DualAudio.Probe coord [phone-name] (this probe would hold a second connection)."); break;
                     default: _log.Warn($"Unknown command '{parts[0]}'. Type 'help'."); break;
                 }
             }

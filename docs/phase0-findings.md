@@ -81,6 +81,16 @@ Holds across: [x] reconnect  [ ] probe restart  [ ] PC reboot  [ ] second phone 
   `connect 0` succeeded ~1.5 min later in ~4 s -> auto-reconnect on unexpected Closed is viable.
 - Watcher `Updated` events are unreliable for metadata: after the drop it reported `Name="4"` and
   `IsConnected=n/a`. Keep the name from `Added`; don't use IsConnected as a signal.
+- Phone name shown as "4" (2026-11-11): the probe `list` shows the phone as "4". Before re-pairing,
+  Windows Settings > Bluetooth & devices also showed "4"; after remove + re-pair, Settings shows the
+  correct name, but the probe still shows "4". So the Name on the A2DP-sink interface
+  (AudioPlaybackConnection.GetDeviceSelector results) is unreliable; the real name lives on the parent
+  Bluetooth device. Fix: resolve the display name from the parent Bluetooth device (ContainerId /
+  BluetoothDevice), falling back to the interface Name; users can also set a nickname (Prompt 7).
+  Update: the bug is intermittent (later runs the interface reported "Shlawg"). Fixed by
+  BluetoothDeviceNameResolver: matches the paired device by container id and uses its
+  DeviceInformation.Name (BluetoothDevice.Name was rejected: it returned "Bluetooth <full MAC>" for
+  AirPods). Logs show both names, so the next "4" occurrence is captured automatically.
 
 ## Evidence (log excerpts)
 
@@ -120,3 +130,4 @@ Headset Earphone [DEFAULT: Communications]: [15] svchost "Microphone (Shlawg A2D
 - [ ] Latency measurement
 - [ ] Second phone (if available)
 - [ ] Fill TBD fields (PC model, adapter + driver, phone model/OS)
+- [x] Phone name "4": name lookup now uses the parent Bluetooth device (verified with `list`)

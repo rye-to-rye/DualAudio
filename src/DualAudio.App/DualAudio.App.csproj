@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>DualAudio.App</RootNamespace>
+    <AssemblyName>DualAudio</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DualAudio.Core\DualAudio.Core.csproj" />
+    <ProjectReference Include="..\DualAudio.Infrastructure\DualAudio.Infrastructure.csproj" />
+    <ProjectReference Include="..\DualAudio.Platform.Windows\DualAudio.Platform.Windows.csproj" />
+  </ItemGroup>
+
+</Project>

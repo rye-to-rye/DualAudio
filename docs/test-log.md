@@ -73,3 +73,20 @@ Optional negative checks:
 - **Unknown yet:** which side closed the link (phone power saving vs Windows); exact idle threshold.
 - **Planned fix:** ConnectionCoordinator treats unexpected `Closed` as Disconnected and auto-reconnects with backoff (Prompt 3 ReconnectPolicy), so the link is ready when the user picks up the phone.
 
+
+### BUG-003: Frequent drops under `coord`, then reconnects refused with 0x8007001F
+
+- **When:** 2026-11-11, 15:01 onwards, Prompt 4 `coord` harness (ConnectionCoordinator + real adapters).
+- **Phone:** "Shlawg" (model / OS: TBD). AirPods are also paired to this PC; whether they were connected to the phone: TBD.
+- **Drops (Connected -> unexpected Closed):** 31 s, 7 s, 13 s, 28 s, 11 s, 50 s, 5 s, 13 s, then one stretch of 8.5 min (15:33:13 -> 15:41:49).
+  For comparison, the old probe `connect` (Prompt 1/2 code) held 4-15 min per connection earlier the same day.
+- **Reconnect failures:** OpenAsync Status=UnknownFailure, ExtendedError=0x8007001F (ERROR_GEN_FAILURE). Sometimes
+  clears after 1-2 retries; after the 15:41:49 drop, every attempt failed (attempts 1-7+ through 15:43:25).
+- **Explained (15:41:49 onward):** the phone's Bluetooth was turned off. So with phone BT off, OpenAsync fails with
+  UnknownFailure 0x8007001F rather than a distinct error, and the device stays in the watcher. App should map
+  0x8007001F to a friendly "Can't reach your phone - is Bluetooth on?" message instead of "Couldn't connect".
+- **Recovery so far:** auto-reconnect worked for the short drops (typically 4-6 s gap). Unknown how to clear the persistent-failure state.
+- **Unknown yet:** is it our new code (RadioMonitor watcher, name resolver, coordinator timing) or the phone (iPhone moving audio
+  to AirPods / power saving)? Needs a controlled A/B: old probe vs `coord`, 5 min each, same conditions, AirPods away.
+- **Note:** auto-reconnecting immediately after a phone-initiated close may also be fighting the phone; consider waiting for
+  the phone to start playback again, or a longer first backoff, once the cause is known.

@@ -10,9 +10,11 @@ namespace DualAudio.Core.Connection;
 /// Owns the connection state machine (docs/architecture.md). Every transition runs through one
 /// <see cref="SemaphoreSlim"/>, so double-clicks and platform events arriving on random threads cannot race.
 /// Public methods never throw for runtime failures; failures become <see cref="ConnectionState.Error"/>.
-/// <para>Transitions are decided under the lock, but <see cref="StateChanged"/> is raised only after the lock
-/// is released, in transition order, so handlers may call <see cref="ConnectAsync"/>/<see cref="DisconnectAsync"/>.
-/// Events are raised on a thread pool or caller thread; handlers marshal to the UI thread themselves.</para>
+/// <para>Transitions are decided under the lock, but <see cref="StateChanged"/> is never raised on a thread that
+/// holds it, and always in transition order, so handlers may call <see cref="ConnectAsync"/>/<see cref="DisconnectAsync"/>
+/// (even blocking). Events are raised after the lock is released or, when a transition awaits a slow platform
+/// call (OpenAsync, CloseAsync), right before that await on a pool thread, so intermediate states such as
+/// Enabling/Opening are seen while the call runs. Handlers marshal to the UI thread themselves.</para>
 /// </summary>
 public sealed class ConnectionCoordinator : IAsyncDisposable
 {
@@ -421,7 +423,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         {
             openTask = _receiver.OpenAsync(deviceId, openCts.Token);
             var timeoutTask = _clock.Delay(_options.OpenTimeout, timeoutCts.Token);
-            first = await Task.WhenAny(openTask, timeoutTask).ConfigureAwait(false);
+            first = await AwaitFlushingEventsAsync(Task.WhenAny(openTask, timeoutTask)).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -841,11 +843,59 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     {
         try
         {
-            await _receiver.CloseAsync().ConfigureAwait(false);
+            await AwaitFlushingEventsAsync(_receiver.CloseAsync()).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Closing the receiver failed");
+        }
+    }
+
+    /// <summary>
+    /// Awaits a platform call made under the transition lock. If it hasn't completed yet (it may take seconds:
+    /// OpenAsync, the open timeout, CloseAsync), queued events are raised first on a pool thread that doesn't hold
+    /// the lock, so a UI sees Enabling/Opening while the call runs and handlers may still block on
+    /// <see cref="DisconnectAsync"/> without deadlocking.
+    /// </summary>
+    private async Task<T> AwaitFlushingEventsAsync<T>(Task<T> task)
+    {
+        if (!task.IsCompleted)
+        {
+            FlushEventsInBackground();
+        }
+
+        return await task.ConfigureAwait(false);
+    }
+
+    private async Task AwaitFlushingEventsAsync(Task task)
+    {
+        if (!task.IsCompleted)
+        {
+            FlushEventsInBackground();
+        }
+
+        await task.ConfigureAwait(false);
+    }
+
+    private void FlushEventsInBackground()
+    {
+        lock (_sync)
+        {
+            if (_dispatchingEvents || _pendingEvents.Count == 0)
+            {
+                return;
+            }
+        }
+
+        // Tracked like a transition so WhenIdleAsync also waits for these events to be delivered.
+        var flush = Task.Run(DispatchPendingEvents);
+        lock (_sync)
+        {
+            _inFlight.RemoveAll(t => t.IsCompleted);
+            if (!flush.IsCompleted)
+            {
+                _inFlight.Add(flush);
+            }
         }
     }
 

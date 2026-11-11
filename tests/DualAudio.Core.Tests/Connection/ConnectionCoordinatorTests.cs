@@ -433,6 +433,64 @@ public sealed class ConnectionCoordinatorTests
         h.Transitions[^1].Previous.Should().Be(Connected);
     }
 
+    [Fact]
+    public async Task Enabling_and_Opening_are_raised_before_a_slow_OpenAsync_completes()
+    {
+        await using var h = new CoordinatorHarness();
+        await h.AddDeviceAsync();
+        var open = new TaskCompletionSource<OpenResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.Receiver.OpenAsync(default!, default).ReturnsForAnyArgs(open.Task);
+        var openingSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.Sut.StateChanged += (_, e) =>
+        {
+            if (e.Current == Opening)
+            {
+                openingSeen.TrySetResult();
+            }
+        };
+
+        var connect = h.Sut.ConnectAsync(PhoneId);
+        await openingSeen.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        open.Task.IsCompleted.Should().BeFalse();
+        connect.IsCompleted.Should().BeFalse("the transition is still awaiting OpenAsync");
+        h.States.Should().Equal(Enabling, Opening);
+
+        open.SetResult(OpenResult.Ok());
+        await connect.WaitAsync(TimeSpan.FromSeconds(5));
+        h.RaiseReceiver(ReceiverState.Opened);
+        await h.SettleAsync();
+        h.States.Should().Equal(Enabling, Opening, Connected);
+    }
+
+    [Fact]
+    public async Task Handler_blocking_on_DisconnectAsync_during_a_slow_OpenAsync_does_not_deadlock()
+    {
+        await using var h = new CoordinatorHarness();
+        await h.AddDeviceAsync();
+        var open = new TaskCompletionSource<OpenResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.Receiver.OpenAsync(default!, default).ReturnsForAnyArgs(open.Task);
+        bool? disconnectCompletedInHandler = null;
+        h.Sut.StateChanged += (_, e) =>
+        {
+            if (e.Current == Opening)
+            {
+                // Raised while the open is still running; must not be on the thread holding the transition lock.
+#pragma warning disable xUnit1031
+                disconnectCompletedInHandler = h.Sut.DisconnectAsync().Wait(TimeSpan.FromSeconds(5));
+#pragma warning restore xUnit1031
+            }
+        };
+
+        await h.Sut.ConnectAsync(PhoneId).WaitAsync(TimeSpan.FromSeconds(10));
+        await h.SettleAsync();
+
+        disconnectCompletedInHandler.Should().BeTrue();
+        open.Task.IsCompleted.Should().BeFalse("the open was abandoned, not awaited to completion");
+        h.Sut.CurrentState.Should().Be(Disconnected);
+        h.States.Should().Equal(Enabling, Opening, Disconnected);
+    }
+
     // ------------------------------------------------------------------ device metadata
 
     [Fact]

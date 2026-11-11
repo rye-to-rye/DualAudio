@@ -31,6 +31,9 @@ After each run, paste the relevant lines into the results below.
 | 10 | Turn Bluetooth back on, wait for `Watcher Added`, then `list` and `connect <index>`. | Connects again. |
 | 11 | `quit` | `Shutting down …` then `Shutdown complete.` and the process exits with code 0. |
 | 12 | (Optional) Repeat with Ctrl+C instead of `quit`. | Same clean shutdown. |
+| 13 | Connected and playing: turn **the phone's** Bluetooth off (PC Bluetooth stays on). | `Connection StateChanged -> Closed`, then `[WRN] Connection lost (state Closed)` and `Connection to "…" disposed (connection lost).` Note any `Watcher Updated: … System.Devices.Aep.IsConnected=…` lines. No crash. |
+| 14 | Turn the phone's Bluetooth back on, then `connect 0` **without** typing `disconnect` first. | Connects (`OpenAsync: Status=Success`); no "Already connected". |
+| 15 | Connected and playing: pause audio on the phone for 60 s, then resume. | **No** `Connection lost` line during the pause; audio resumes through the headset. (Confirms pausing doesn't fire Closed.) |
 
 Optional negative checks:
 - `connect 99` gives `No device at index 99`.
@@ -45,3 +48,28 @@ Optional negative checks:
 | | | | | | |
 
 **Acceptance:** steps 1–11 pass on at least one PC. **Status: NOT YET ACCEPTED.**
+
+## Known issues
+
+### BUG-001: Connected (Status=Success, State=Opened) but no audio from phone
+
+- **When:** 2026-11-11, during Phase 0b (Prompt 2 session testing), on the first `connect` of a new probe run
+- **Phone:** "Shlawg" (model / OS: TBD)
+- **Fixed by:** `disconnect` then `connect 0`, after which audio played normally
+- **Unknown yet:** was the `A2DP SNK` session present? Peak > 0? Was the phone routing audio to the PC?
+- **Next time it happens (before resetting):** run `sessions` and note the `A2DP SNK` line (State/Vol/Mute/Peak), and check the phone's audio output picker.
+  - No `A2DP SNK` session → PC side (link opened, playback never started)
+  - Session present, Peak = 0 → phone side (not sending / routed elsewhere)
+  - Session present, Peak > 0, silent → PC output / volume
+- **Planned mitigation:** detect "Opened but no audio" via `IsReceivingAudio` (Prompt 5) and offer/attempt reconnect (Prompt 9).
+
+### BUG-002: Audio link drops after a few minutes idle
+
+- **When:** 2026-11-11. Connected 13:05:18; `Connection StateChanged -> Closed` at 13:09:15 (~4 min) while the phone was idle.
+- **Phone:** "Shlawg" (model / OS: TBD); screen-lock state at the time: TBD
+- **Signals:** only `Closed`. No radio change, no `Watcher Removed`. A `Watcher Updated` followed with `Name="4"`, `IsConnected=n/a`.
+- **Recovery:** PC-initiated `connect 0` at 13:10:42 succeeded (`OpenAsync` Success in ~4 s) and audio played; volume/mute tests then worked on the same session.
+- **Not caused by pausing:** a 60 s pause did not fire `Closed`.
+- **Unknown yet:** which side closed the link (phone power saving vs Windows); exact idle threshold.
+- **Planned fix:** ConnectionCoordinator treats unexpected `Closed` as Disconnected and auto-reconnects with backoff (Prompt 3 ReconnectPolicy), so the link is ready when the user picks up the phone.
+

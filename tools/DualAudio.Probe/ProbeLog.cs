@@ -76,15 +76,18 @@ internal sealed class ProbeLog : IDisposable
 internal static partial class Redact
 {
     // Colon/dash separated MAC (aa:bb:cc:dd:ee:ff) or a bare 12-hex-digit run (aabbccddeeff).
+    // The bare run excludes the last group of a GUID ("...-1234-0123456789ab"), which is also 12 hex
+    // digits but is not an address; redacting it would hide audio session/endpoint identifier patterns.
     [GeneratedRegex(
-        @"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}(?![0-9A-Fa-f])|(?<![0-9A-Fa-f])[0-9A-Fa-f]{12}(?![0-9A-Fa-f])")]
+        @"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}(?![0-9A-Fa-f])|(?<![0-9A-Fa-f])(?<![0-9A-Fa-f]{4}-)[0-9A-Fa-f]{12}(?![0-9A-Fa-f])")]
     private static partial Regex MacLike();
 
     [GeneratedRegex("[^0-9A-Fa-f]")]
     private static partial Regex NonHex();
 
-    public static string Addresses(string text) =>
-        MacLike().Replace(text, m => "**" + NonHex().Replace(m.Value, "")[^4..]);
+    [return: System.Diagnostics.CodeAnalysis.NotNullIfNotNull(nameof(text))]
+    public static string? Addresses(string? text) =>
+        text is null ? null : MacLike().Replace(text, m => "**" + NonHex().Replace(m.Value, "")[^4..]);
 
     // Trailing "#{interface-class-guid}" shared by every device interface of the same class.
     [GeneratedRegex(@"#\{[0-9A-Fa-f\-]{36}\}$")]

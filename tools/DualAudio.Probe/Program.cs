@@ -37,6 +37,7 @@ internal sealed class Probe : IAsyncDisposable
     private static readonly TimeSpan OpenTimeout = TimeSpan.FromSeconds(15);
 
     private readonly ProbeLog _log;
+    private readonly AudioSessionCommands _audio;
     private readonly CancellationTokenSource _quit = new();
 
     // Devices reported by the watcher, in "Added" order. Guarded by _devicesLock.
@@ -49,6 +50,12 @@ internal sealed class Probe : IAsyncDisposable
     private string? _connectedId;
     private string? _connectedName;
 
+    // The connection whose StateChanged has reported Opened at least once. A Closed state only
+    // counts as "connection lost" for this object (the initial Closed before Opened is ignored).
+    // Guarded by _openedLock, which is never held across an await, so StateChanged never blocks.
+    private readonly object _openedLock = new();
+    private AudioPlaybackConnection? _openedConnection;
+
     // In-flight connect attempt, so a Removed event can abort it. Guarded by _pendingLock.
     private readonly object _pendingLock = new();
     private string? _pendingId;
@@ -58,7 +65,11 @@ internal sealed class Probe : IAsyncDisposable
     private DeviceWatcher? _watcher;
     private bool _disposed;
 
-    public Probe(ProbeLog log) => _log = log;
+    public Probe(ProbeLog log)
+    {
+        _log = log;
+        _audio = new AudioSessionCommands(log);
+    }
 
     public async Task<int> RunAsync()
     {
@@ -224,6 +235,11 @@ internal sealed class Probe : IAsyncDisposable
             _log.Info(text is null
                 ? $"Watcher Updated: unknown device Id={Redact.ShortId(update.Id)}"
                 : $"Watcher Updated: {text}");
+
+            // Logging only: what Windows reports in this update when the phone drops/returns.
+            if (update.Properties.TryGetValue(IsConnectedKey, out var isConnected))
+                _log.Info($"Watcher Updated: Id={Redact.ShortId(update.Id)} update carries " +
+                          $"{IsConnectedKey}={isConnected?.ToString() ?? "null"}");
         }
         catch (Exception ex) { _log.Exception("Watcher.Updated handler", ex); }
     }
@@ -308,7 +324,16 @@ internal sealed class Probe : IAsyncDisposable
           connect <index>    open an A2DP sink connection to that device
           disconnect         close and dispose the current connection
           state              show connection / watcher / radio state
-          quit               dispose everything and exit (Ctrl+C also works)
+
+        Audio sessions (render endpoints; read-only except setvol/mute):
+          endpoints          list render endpoints, state, and default roles
+          sessions [all]     list sessions on the default endpoint (or every active one)
+          snapshot <name>    save sessions of all active endpoints to snapshots\<name>.json
+          diff <a> <b>       show sessions added/removed/changed between two snapshots
+          setvol <i> <0-100> set the volume of session [i] from the last listing ONLY
+          mute <i> on|off    mute/unmute session [i] from the last listing ONLY
+
+          quit              dispose everything and exit (Ctrl+C also works)
 
         """);
 
@@ -342,6 +367,35 @@ internal sealed class Probe : IAsyncDisposable
                         break;
                     case "disconnect": await DisconnectAsync(); break;
                     case "state": await StateAsync(); break;
+                    case "endpoints": await _audio.EndpointsAsync(); break;
+                    case "sessions":
+                        if (parts.Length >= 2 && !parts[1].Equals("all", StringComparison.OrdinalIgnoreCase))
+                            _log.Warn("Usage: sessions [all]");
+                        else
+                            await _audio.SessionsAsync(all: parts.Length >= 2);
+                        break;
+                    case "snapshot":
+                        if (parts.Length < 2) _log.Warn("Usage: snapshot <name>");
+                        else await _audio.SnapshotAsync(parts[1]);
+                        break;
+                    case "diff":
+                        if (parts.Length < 3) _log.Warn("Usage: diff <a> <b>");
+                        else await _audio.DiffAsync(parts[1], parts[2]);
+                        break;
+                    case "setvol":
+                        if (parts.Length < 3 || !int.TryParse(parts[1], out var volIndex)
+                            || !int.TryParse(parts[2], out var percent) || percent is < 0 or > 100)
+                            _log.Warn("Usage: setvol <sessionIndex> <0-100>   (index from 'sessions')");
+                        else
+                            await _audio.SetVolumeAsync(volIndex, percent);
+                        break;
+                    case "mute":
+                        if (parts.Length < 3 || !int.TryParse(parts[1], out var muteIndex)
+                            || ParseOnOff(parts[2]) is not { } mute)
+                            _log.Warn("Usage: mute <sessionIndex> on|off   (index from 'sessions')");
+                        else
+                            await _audio.SetMuteAsync(muteIndex, mute);
+                        break;
                     case "quit" or "exit" or "q": return;
                     case "help" or "?": PrintHelp(); break;
                     default: _log.Warn($"Unknown command '{parts[0]}'. Type 'help'."); break;
@@ -351,6 +405,13 @@ internal sealed class Probe : IAsyncDisposable
             catch (Exception ex) { _log.Exception($"Command '{parts[0]}'", ex); }
         }
     }
+
+    private static bool? ParseOnOff(string s) => s.ToLowerInvariant() switch
+    {
+        "on" or "true" or "1" => true,
+        "off" or "false" or "0" => false,
+        _ => null,
+    };
 
     private void List()
     {
@@ -462,8 +523,44 @@ internal sealed class Probe : IAsyncDisposable
 
     private void OnConnectionStateChanged(AudioPlaybackConnection sender, object args)
     {
-        try { _log.Warn($"Connection StateChanged -> {sender.State}"); }
+        try
+        {
+            var state = sender.State;
+            _log.Warn($"Connection StateChanged -> {state}");
+
+            if (state == AudioPlaybackConnectionState.Opened)
+            {
+                lock (_openedLock) _openedConnection = sender;
+            }
+            else if (state == AudioPlaybackConnectionState.Closed)
+            {
+                bool wasOpened;
+                lock (_openedLock) wasOpened = ReferenceEquals(_openedConnection, sender);
+                if (wasOpened) _ = HandleConnectionLostAsync(sender);
+            }
+        }
         catch (Exception ex) { _log.Exception("Connection.StateChanged handler", ex); }
+    }
+
+    /// <summary>
+    /// Releases <paramref name="lost"/> if it is still the current connection. If the user (or the
+    /// device-removed path) already released it, _connection no longer refers to it and nothing happens,
+    /// so it is never disposed twice.
+    /// </summary>
+    private async Task HandleConnectionLostAsync(AudioPlaybackConnection lost)
+    {
+        try
+        {
+            await _connLock.WaitAsync();
+            try
+            {
+                if (!ReferenceEquals(_connection, lost)) return;
+                _log.Warn("Connection lost (state Closed)");
+                ReleaseConnection_NoLock("connection lost");
+            }
+            finally { _connLock.Release(); }
+        }
+        catch (Exception ex) { _log.Exception("Connection-lost handling", ex); }
     }
 
     // ---------------------------------------------------------------- 6. Disconnect / state / dispose
@@ -489,6 +586,10 @@ internal sealed class Probe : IAsyncDisposable
         _connection = null;
         _connectedId = null;
         _connectedName = null;
+        lock (_openedLock)
+        {
+            if (ReferenceEquals(_openedConnection, conn)) _openedConnection = null;
+        }
 
         try { conn.StateChanged -= OnConnectionStateChanged; }
         catch (Exception ex) { _log.Exception("Unsubscribe StateChanged", ex); }

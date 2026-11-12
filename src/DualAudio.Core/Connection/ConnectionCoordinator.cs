@@ -20,6 +20,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
 {
     private readonly IBluetoothAudioSourceWatcher _watcher;
     private readonly IAudioReceiver _receiver;
+    private readonly IAudioSessionController? _sessions;
     private readonly IRadioMonitor _radio;
     private readonly IClock _clock;
     private readonly ConnectionCoordinatorOptions _options;
@@ -52,13 +53,24 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     private bool _linkLossPending;
     private int _linkLossId;
 
+    // BUG-001 (stale phone session). Reset per user connect; only touched while holding _transitionLock.
+    private bool _primedThisConnect;
+    private bool _staleAtConnect;
+    private bool _safetyNetUsed;
+    private int _primingAttempt;
+    private bool _reopenPending;
+    private int _primingReopenNumber; // 1-based number of the priming reopen in flight; 0 when none
+
+    /// <param name="sessions">Optional. When given, enables the BUG-001 stale-session priming cycle, the
+    /// post-connect safety net, and the shutdown session check. When null, none of these run.</param>
     public ConnectionCoordinator(
         IBluetoothAudioSourceWatcher watcher,
         IAudioReceiver receiver,
         IRadioMonitor radio,
         IClock clock,
         ConnectionCoordinatorOptions? options = null,
-        ILogger<ConnectionCoordinator>? logger = null)
+        ILogger<ConnectionCoordinator>? logger = null,
+        IAudioSessionController? sessions = null)
     {
         ArgumentNullException.ThrowIfNull(watcher);
         ArgumentNullException.ThrowIfNull(receiver);
@@ -67,6 +79,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
 
         _watcher = watcher;
         _receiver = receiver;
+        _sessions = sessions;
         _radio = radio;
         _clock = clock;
         _options = options ?? new ConnectionCoordinatorOptions();
@@ -157,7 +170,15 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         await _transitionLock.WaitAsync().ConfigureAwait(false);
         try
         {
+            // Close and dispose the connection here, awaited, so it is released before the process exits
+            // (BUG-001: a pipeline left Active by the previous process breaks the next start's first open).
+            var hadLink = _snapshot.State is ConnectionState.Connected or ConnectionState.Opening
+                          || _receiver.State == ReceiverState.Opened;
             await CloseReceiverAsync().ConfigureAwait(false);
+            if (hadLink)
+            {
+                await LogPhoneSessionAfterCloseAsync().ConfigureAwait(false);
+            }
         }
         finally
         {
@@ -350,6 +371,11 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         _targetDeviceId = deviceId;
         _targetDevice = _devices.Find(deviceId) ?? new PhoneDevice(deviceId, string.Empty, false);
         _resumeWhenRadioOn = false;
+        _primedThisConnect = false;
+        _staleAtConnect = false;
+        _safetyNetUsed = false;
+        _primingAttempt = 0;
+        _primingReopenNumber = 0;
         _logger.LogInformation("Connect requested for {Device}", LogRedaction.DeviceId(deviceId));
         await BeginConnectAsync(isReconnect: false, cancellationToken).ConfigureAwait(false);
     }
@@ -377,6 +403,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     private async Task BeginConnectAsync(bool isReconnect, CancellationToken cancellationToken)
     {
         var deviceId = _targetDeviceId!;
+        _primingReopenNumber = 0;
         SetState(ConnectionState.Enabling, null);
 
         if (RadioError(_radio.Status) is { } radioError)
@@ -406,6 +433,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     {
         var deviceId = _targetDeviceId!;
         var attempt = ++_attemptId;
+        _reopenPending = false;
         SetState(ConnectionState.Opening, null);
 
         using var openCts = CancellationTokenSource.CreateLinkedTokenSource(callerToken, _lifetime.Token);
@@ -415,6 +443,15 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
             _openCts = openCts;
             _openDeviceId = deviceId;
             _openCancelReason = OpenCancelReason.None;
+        }
+
+        if (await IsStalePhoneSessionAsync(openCts.Token).ConfigureAwait(false))
+        {
+            // BUG-001: this open only primes the pipeline; Connected comes from the reopen after it.
+            _primedThisConnect = true;
+            _staleAtConnect = true;
+            _primingAttempt = attempt;
+            _logger.LogWarning("stale phone session detected; priming reconnect");
         }
 
         Task<OpenResult> openTask;
@@ -522,8 +559,8 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
 
         if (_receiver.State == ReceiverState.Opened)
         {
-            _logger.LogWarning("Opened event never arrived but receiver reports Opened; treating as connected");
-            MarkConnected();
+            _logger.LogWarning("Opened event never arrived but receiver reports Opened; treating as opened");
+            await OnOpenedAsync().ConfigureAwait(false);
             return;
         }
 
@@ -531,12 +568,235 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         Fail(ErrorKind.OpenTimedOut, "Opened event did not arrive");
     }
 
+    /// <summary>The current attempt reached Opened (state is Opening). Finishes priming or marks Connected.</summary>
+    private async Task OnOpenedAsync()
+    {
+        if (_primingAttempt == 0 || _primingAttempt != _attemptId)
+        {
+            MarkConnected();
+            return;
+        }
+
+        // Priming open done: close it and open again. State stays Opening throughout, so the UI never sees
+        // Connected -> Disconnected; the Closed event from this close is ignored while Opening.
+        _primingAttempt = 0;
+        _logger.LogInformation("Priming connection opened; closing it");
+        await CloseReceiverAsync().ConfigureAwait(false);
+        SchedulePrimingReopen(1, _options.PrimingDelay);
+    }
+
+    private int PrimingReopenTotal => 1 + _options.PrimingRetryDelays.Count;
+
+    private void SchedulePrimingReopen(int number, TimeSpan delay)
+    {
+        _logger.LogInformation("priming reopen attempt {Number}/{Total} in {Delay}s", number, PrimingReopenTotal, delay.TotalSeconds);
+        ScheduleReopen(delay, number);
+    }
+
+    /// <summary>
+    /// Waits <paramref name="delay"/> in Opening, then opens again. The attempt id is bumped so the closed
+    /// attempt's confirmation timer is void, and Opened events are ignored until the reopen.
+    /// </summary>
+    /// <param name="primingReopenNumber">1-based priming reopen number, or 0 for the safety net's reopen.</param>
+    private void ScheduleReopen(TimeSpan delay, int primingReopenNumber = 0)
+    {
+        var attempt = ++_attemptId;
+        _reopenPending = true;
+        ScheduleGuarded(delay, () => ReopenAsync(attempt, primingReopenNumber));
+    }
+
+    /// <summary>Reopen of a priming cycle or of the safety net, unless something else happened meanwhile.</summary>
+    private async Task ReopenAsync(int attempt, int primingReopenNumber)
+    {
+        if (_snapshot.State != ConnectionState.Opening || attempt != _attemptId)
+        {
+            return;
+        }
+
+        _primingReopenNumber = primingReopenNumber;
+        await OpenAsync(CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A priming reopen failed (receiver already closed). Retryable failures (Unknown, e.g. 0x8007001F, and
+    /// OpenTimedOut) are retried while staying in Opening; after the last one the coordinator goes Disconnected
+    /// and hands over to the reconnect policy instead of a terminal Error. Returns false if not handled here.
+    /// </summary>
+    private bool TryHandlePrimingReopenFailure(ErrorKind kind, string? detail)
+    {
+        var number = _primingReopenNumber;
+        _primingReopenNumber = 0;
+        if (number == 0 || kind is not (ErrorKind.Unknown or ErrorKind.OpenTimedOut))
+        {
+            return false;
+        }
+
+        _logger.LogWarning("Priming reopen {Number}/{Total} failed: {Kind} ({Detail})", number, PrimingReopenTotal, kind, detail ?? "-");
+        if (number < PrimingReopenTotal)
+        {
+            SchedulePrimingReopen(number + 1, _options.PrimingRetryDelays[number - 1]);
+            return true;
+        }
+
+        _logger.LogWarning("All priming reopens failed; handing over to reconnect");
+        SetState(ConnectionState.Disconnected, kind);
+        if (AutoReconnect)
+        {
+            _isReconnecting = true;
+            ScheduleNextReconnect();
+        }
+
+        return true;
+    }
+
     private void MarkConnected()
     {
+        _primingReopenNumber = 0;
         StopReconnecting();
         _resumeWhenRadioOn = false;
         _targetDevice = _devices.Find(_targetDeviceId!) ?? _targetDevice;
         SetState(ConnectionState.Connected, null);
+        if (_staleAtConnect && !_safetyNetUsed && _sessions is not null)
+        {
+            StartStaleSessionWatch(_attemptId);
+        }
+    }
+
+    // ---------------------------------------------------------------- BUG-001 stale phone session
+
+    /// <summary>
+    /// True when, before this open, the default endpoint's phone session is already Active although we hold
+    /// no connection: a pipeline left over from a previous process. Checked at most once per user connect.
+    /// </summary>
+    private async Task<bool> IsStalePhoneSessionAsync(CancellationToken cancellationToken)
+    {
+        if (_primedThisConnect || _sessions is null || _receiver.State == ReceiverState.Opened)
+        {
+            return false;
+        }
+
+        try
+        {
+            var status = await AwaitFlushingEventsAsync(_sessions.GetPhoneAudioStatusAsync(cancellationToken)).ConfigureAwait(false);
+            return status.IsActiveOnDefault;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Reading the phone session before open failed; assuming not stale");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Safety net: after Connected, watches the phone session for <see cref="ConnectionCoordinatorOptions.StaleSessionWatchWindow"/>.
+    /// Fresh activity is a peak above the threshold, or Inactive followed by Active. Without it, reopens once.
+    /// Runs outside the transition lock; the reopen itself is serialized and re-checks everything.
+    /// </summary>
+    private void StartStaleSessionWatch(int attempt)
+    {
+        var sessions = _sessions!;
+        var version = Volatile.Read(ref _intentVersion);
+        var token = _lifetime.Token;
+        _ = WatchAsync();
+
+        async Task WatchAsync()
+        {
+            var sawInactive = false;
+            var elapsed = TimeSpan.Zero;
+            try
+            {
+                while (elapsed < _options.StaleSessionWatchWindow)
+                {
+                    await _clock.Delay(_options.StaleSessionPollInterval, token).ConfigureAwait(false);
+                    elapsed += _options.StaleSessionPollInterval;
+                    if (version != Volatile.Read(ref _intentVersion) || _snapshot.State != ConnectionState.Connected)
+                    {
+                        return;
+                    }
+
+                    PhoneAudioStatus status;
+                    try
+                    {
+                        status = await sessions.GetPhoneAudioStatusAsync(token).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        _logger.LogDebug(ex, "Safety net: reading the phone session failed");
+                        continue;
+                    }
+
+                    if (status.Peak > _options.StaleSessionPeakThreshold || (status.IsActiveOnDefault && sawInactive))
+                    {
+                        _logger.LogDebug("Safety net: phone session shows fresh activity");
+                        return;
+                    }
+
+                    sawInactive |= !status.IsActiveOnDefault;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            await Enqueue(() => version == Volatile.Read(ref _intentVersion) ? StaleSessionReopenAsync(attempt) : Task.CompletedTask)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private async Task StaleSessionReopenAsync(int attempt)
+    {
+        if (_snapshot.State != ConnectionState.Connected || attempt != _attemptId || _safetyNetUsed)
+        {
+            return;
+        }
+
+        _safetyNetUsed = true;
+        _logger.LogWarning(
+            "Phone session was stale before connect and shows no fresh activity {Window} s after Connected; reopening once",
+            _options.StaleSessionWatchWindow.TotalSeconds);
+        CancelLinkLoss();
+        SetState(ConnectionState.Opening, null);
+        await CloseReceiverAsync().ConfigureAwait(false);
+        ScheduleReopen(_options.PrimingDelay);
+    }
+
+    /// <summary>After the shutdown close: logs whether the phone session went Inactive (diagnostics only).</summary>
+    private async Task LogPhoneSessionAfterCloseAsync()
+    {
+        if (_sessions is null)
+        {
+            return;
+        }
+
+        _logger.LogInformation("Connection closed and disposed on shutdown");
+        var deadline = _clock.UtcNow + _options.ShutdownSessionCheckTimeout;
+        try
+        {
+            while (true)
+            {
+                var status = await _sessions.GetPhoneAudioStatusAsync(CancellationToken.None).ConfigureAwait(false);
+                if (!status.IsActiveOnDefault)
+                {
+                    _logger.LogInformation("Phone session on the default endpoint is Inactive after close");
+                    return;
+                }
+
+                if (_clock.UtcNow >= deadline)
+                {
+                    _logger.LogWarning(
+                        "Phone session on the default endpoint is still Active {Timeout} s after a clean close (next start may see it as stale)",
+                        _options.ShutdownSessionCheckTimeout.TotalSeconds);
+                    return;
+                }
+
+                await _clock.Delay(_options.StaleSessionPollInterval, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Reading the phone session after close failed");
+        }
     }
 
     /// <summary>
@@ -545,6 +805,11 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     /// </summary>
     private void Fail(ErrorKind kind, string? detail)
     {
+        if (TryHandlePrimingReopenFailure(kind, detail))
+        {
+            return;
+        }
+
         _logger.LogWarning(
             "Connection to {Device} failed: {Kind} ({Detail})",
             LogRedaction.DeviceId(_targetDeviceId),
@@ -689,11 +954,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         });
 
     private void OnReceiverStateChanged(object? sender, ReceiverStateChangedEventArgs e) =>
-        _ = Enqueue(() =>
-        {
-            HandleReceiverState(e.DeviceId, e.State);
-            return Task.CompletedTask;
-        });
+        _ = Enqueue(() => HandleReceiverStateAsync(e.DeviceId, e.State));
 
     private void OnRadioStatusChanged(object? sender, RadioStatusChangedEventArgs e)
     {
@@ -739,7 +1000,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         }
     }
 
-    private void HandleReceiverState(string deviceId, ReceiverState receiverState)
+    private async Task HandleReceiverStateAsync(string deviceId, ReceiverState receiverState)
     {
         var state = _snapshot.State;
         if (!SameDevice(deviceId, _targetDeviceId))
@@ -748,9 +1009,13 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
             return;
         }
 
-        if (receiverState == ReceiverState.Opened && state == ConnectionState.Opening)
+        if (receiverState == ReceiverState.Opened && state == ConnectionState.Opening && _reopenPending)
         {
-            MarkConnected();
+            _logger.LogDebug("Receiver Opened ignored: closed on purpose, waiting to reopen");
+        }
+        else if (receiverState == ReceiverState.Opened && state == ConnectionState.Opening)
+        {
+            await OnOpenedAsync().ConfigureAwait(false);
         }
         else if (receiverState == ReceiverState.Closed && state == ConnectionState.Connected)
         {

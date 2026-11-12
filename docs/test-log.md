@@ -62,6 +62,16 @@ Optional negative checks:
   - Session present, Peak = 0 → phone side (not sending / routed elsewhere)
   - Session present, Peak > 0, silent → PC output / volume
 - **Planned mitigation:** detect "Opened but no audio" via `IsReceivingAudio` (Prompt 5) and offer/attempt reconnect (Prompt 9).
+- **Update 2026-11-11 ~20:45-20:57 (now reproducible every time):** on every fresh `coord` start, the phone
+  session on the default endpoint is ALREADY Active before we connect (log: `Phone session on default endpoint:
+  exists False -> True, active False -> True` at startup, before `connect`). The first OpenAsync succeeds but the
+  session never goes Inactive -> Active and no audio arrives. `disconnect` makes it Inactive; the next `connect`
+  makes it Active again (fresh) and audio plays within ~3 s.
+- **Likely cause:** a stale render pipeline left over from the previous process's connection. Opening on top of
+  it doesn't restart the stream; a full close + reopen does.
+- **Fix direction:** on connect, if a phone session is already Active while we hold no connection (stale), do a
+  priming cycle automatically: open -> close -> short delay -> open. Also make sure quit closes the connection
+  before the process exits.
 
 ### BUG-002: Audio link drops after a few minutes idle
 

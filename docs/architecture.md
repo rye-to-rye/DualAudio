@@ -108,8 +108,14 @@ A change made in the Windows volume mixer is overwritten by the next re-apply.
 - Persists every change. It re-reads the settings first, so other fields are kept.
 - Re-applies the saved values on every transition to Connected.
 - While Connected, and only then, it polls the status every 250 ms (the interval is clamped to at least 250 ms).
-- `IsReceivingAudio` is true when the default endpoint's phone session is Active and its peak was above 0.001
-  at least once in the last 3 s. It is separate from Connected: a paused phone stays Connected but stops receiving.
+- `IsReceivingAudio` uses hysteresis. It turns true as soon as the default endpoint's phone session is Active
+  with a peak above 0.001 (`PhoneAudioOptions.PeakThreshold`). It turns false only after 10 s with no such peak
+  (`PhoneAudioOptions.ReceivingHoldTime`), so the short gaps between videos don't make it flicker. A session going
+  Inactive also waits out the 10 s; only a disconnect turns it false immediately.
+- While the phone is muted, `IsReceivingAudio` keeps the value it had before the mute. Hardware testing showed
+  that Windows reports a muted session as Inactive even though its peak stays above 0. Unmuting starts a fresh
+  10 s hold. Limitation: audio that starts while muted is not detected until unmute.
+- `IsReceivingAudio` is separate from Connected: a paused phone stays Connected but stops receiving.
 - `Changed` follows the coordinator's rules: decided under one lock, raised after release, in order.
 
 `DefaultEndpointMasterVolume` is optional and controls the whole device. It changes the default output's master volume

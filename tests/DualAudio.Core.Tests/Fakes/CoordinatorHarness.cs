@@ -21,13 +21,15 @@ internal sealed class CoordinatorHarness : IAsyncDisposable
         Receiver.State.Returns(ReceiverState.Closed);
         Receiver.OpenAsync(default!, default).ReturnsForAnyArgs(Task.FromResult(OpenResult.Ok()));
         Receiver.CloseAsync().Returns(Task.CompletedTask);
+        Sessions.GetPhoneAudioStatusAsync(default).ReturnsForAnyArgs(_ => Task.FromResult(PhoneStatus));
 
         Options = new ConnectionCoordinatorOptions
         {
             AutoReconnect = autoReconnect,
             Reconnect = reconnect ?? new ReconnectOptions(),
+            ShutdownSessionCheckTimeout = TimeSpan.Zero, // the FakeClock never advances during DisposeAsync
         };
-        Sut = new ConnectionCoordinator(Watcher, Receiver, Radio, Clock, Options);
+        Sut = new ConnectionCoordinator(Watcher, Receiver, Radio, Clock, Options, logger: null, Sessions);
         Sut.StateChanged += (_, e) =>
         {
             lock (_transitions)
@@ -44,6 +46,17 @@ internal sealed class CoordinatorHarness : IAsyncDisposable
     public IAudioReceiver Receiver { get; } = Substitute.For<IAudioReceiver>();
 
     public IRadioMonitor Radio { get; } = Substitute.For<IRadioMonitor>();
+
+    public IAudioSessionController Sessions { get; } = Substitute.For<IAudioSessionController>();
+
+    /// <summary>What <see cref="Sessions"/> reports. Default: no phone session (never stale).</summary>
+    public PhoneAudioStatus PhoneStatus { get; set; } = PhoneAudioStatus.Unavailable;
+
+    public int StatusReads => Sessions.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IAudioSessionController.GetPhoneAudioStatusAsync));
+
+    /// <summary>Sets <see cref="PhoneStatus"/> to one phone session on the default endpoint.</summary>
+    public void SetPhoneSession(bool active, float peak = 0f) =>
+        PhoneStatus = new PhoneAudioStatus([new PhoneSessionState("{0.0.0.00000000}.{headset}", true, active, 100, false)], peak);
 
     public ConnectionCoordinatorOptions Options { get; }
 

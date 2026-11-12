@@ -50,7 +50,8 @@ internal sealed class CoordHarness
                 sp.GetRequiredService<IRadioMonitor>(),
                 sp.GetRequiredService<IClock>(),
                 sp.GetRequiredService<ConnectionCoordinatorOptions>(),
-                sp.GetRequiredService<ILogger<ConnectionCoordinator>>()))
+                sp.GetRequiredService<ILogger<ConnectionCoordinator>>(),
+                sp.GetRequiredService<IAudioSessionController>()))
             .AddSingleton<ISettingsStore, InMemorySettingsStore>()
             .AddSingleton(sp => new PhoneAudioService(
                 sp.GetRequiredService<IAudioSessionController>(),

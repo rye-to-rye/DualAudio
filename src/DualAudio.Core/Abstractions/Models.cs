@@ -60,6 +60,27 @@ public sealed record PhoneSessionInfo(
     string? SessionInstanceIdentifier,
     bool IsSystemSoundsSession);
 
+/// <summary>Live state of one phone session (one per render endpoint).</summary>
+/// <param name="EndpointId">Render endpoint the session lives on.</param>
+/// <param name="IsOnDefaultEndpoint">True for the session on the default Multimedia endpoint (the one Windows plays to).</param>
+/// <param name="IsActive">Session state is Active (Phase 0: only the default endpoint's session is Active while connected).</param>
+/// <param name="VolumePercent">Session volume, 0..100.</param>
+/// <param name="Muted">Session mute.</param>
+public sealed record PhoneSessionState(string EndpointId, bool IsOnDefaultEndpoint, bool IsActive, int VolumePercent, bool Muted);
+
+/// <summary>Snapshot of every phone session plus the default-endpoint session's peak level.</summary>
+/// <param name="Sessions">All phone sessions found, on every active render endpoint.</param>
+/// <param name="Peak">Peak level (0..1) of the phone session on the default endpoint; 0 when there is none.</param>
+public sealed record PhoneAudioStatus(IReadOnlyList<PhoneSessionState> Sessions, float Peak)
+{
+    public static PhoneAudioStatus Unavailable { get; } = new([], 0f);
+
+    /// <summary>False when no phone session exists anywhere; the UI explains why (not connected, nothing played yet).</summary>
+    public bool Available => Sessions.Count > 0;
+
+    public bool IsActiveOnDefault => Sessions.Any(s => s.IsOnDefaultEndpoint && s.IsActive);
+}
+
 /// <summary>A render (output) endpoint, e.g. the user's headset.</summary>
 public sealed record AudioEndpoint(string Id, string Name, bool IsDefault);
 

@@ -1,4 +1,5 @@
 using DualAudio.Core.Abstractions;
+using DualAudio.Platform.Windows.Audio;
 using DualAudio.Platform.Windows.Bluetooth;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -22,6 +23,12 @@ public static class WindowsPlatformServiceCollectionExtensions
         services.TryAddSingleton<IAudioReceiver, PlaybackConnectionReceiver>();
         services.TryAddSingleton<IRadioMonitor, RadioMonitor>();
         services.TryAddSingleton<BluetoothSettingsLauncher>();
+
+        // Core Audio is first touched by the first call on these (no COM in constructors except the worker thread).
+        services.TryAddSingleton<IAudioSessionController, NAudioSessionController>();
+        services.TryAddSingleton<OutputDeviceService>();
+        services.TryAddSingleton<IOutputDeviceService>(sp => sp.GetRequiredService<OutputDeviceService>());
+        services.TryAddSingleton<DefaultEndpointMasterVolume>(); // optional, whole-device volume; not phone-only
         return services;
     }
 }

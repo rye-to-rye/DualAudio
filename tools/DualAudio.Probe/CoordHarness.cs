@@ -1,4 +1,5 @@
 using DualAudio.Core.Abstractions;
+using DualAudio.Core.Audio;
 using DualAudio.Core.Connection;
 using DualAudio.Core.Diagnostics;
 using DualAudio.Core.Errors;
@@ -20,6 +21,9 @@ internal sealed class CoordHarness
     private readonly IRadioMonitor _radio;
     private readonly IBluetoothAudioSourceWatcher _watcher;
     private readonly BluetoothSettingsLauncher _settings;
+    private readonly PhoneAudioService _phoneAudio;
+    private readonly IAudioSessionController _sessions;
+    private readonly IOutputDeviceService _outputs;
     private readonly CancellationTokenSource _quit = new();
 
     private CoordHarness(ProbeLog log, IServiceProvider services)
@@ -29,6 +33,9 @@ internal sealed class CoordHarness
         _watcher = services.GetRequiredService<IBluetoothAudioSourceWatcher>();
         _settings = services.GetRequiredService<BluetoothSettingsLauncher>();
         _coordinator = services.GetRequiredService<ConnectionCoordinator>();
+        _sessions = services.GetRequiredService<IAudioSessionController>();
+        _outputs = services.GetRequiredService<IOutputDeviceService>();
+        _phoneAudio = services.GetRequiredService<PhoneAudioService>();
     }
 
     public static async Task<int> RunAsync(ProbeLog log, string[] args)
@@ -43,7 +50,15 @@ internal sealed class CoordHarness
                 sp.GetRequiredService<IRadioMonitor>(),
                 sp.GetRequiredService<IClock>(),
                 sp.GetRequiredService<ConnectionCoordinatorOptions>(),
-                sp.GetRequiredService<ILogger<ConnectionCoordinator>>()));
+                sp.GetRequiredService<ILogger<ConnectionCoordinator>>()))
+            .AddSingleton<ISettingsStore, InMemorySettingsStore>()
+            .AddSingleton(sp => new PhoneAudioService(
+                sp.GetRequiredService<IAudioSessionController>(),
+                sp.GetRequiredService<ConnectionCoordinator>(),
+                sp.GetRequiredService<ISettingsStore>(),
+                sp.GetRequiredService<IClock>(),
+                new PhoneAudioOptions(),
+                sp.GetRequiredService<ILogger<PhoneAudioService>>()));
 
         // Disposal order (reverse of creation): coordinator first, then the adapters.
         await using var provider = services.BuildServiceProvider();
@@ -59,6 +74,9 @@ internal sealed class CoordHarness
             _log.Info("coord harness: ConnectionCoordinator + real adapters. Type 'help'.");
             _coordinator.StateChanged += OnStateChanged;
             _radio.StatusChanged += OnRadioStatusChanged;
+            _phoneAudio.Changed += OnPhoneAudioChanged;
+            _outputs.DefaultEndpointChanged += OnDefaultEndpointChanged;
+            await _phoneAudio.InitializeAsync(_quit.Token);
 
             // The coordinator subscribed in its constructor; start the sources only now.
             var enumerated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -95,7 +113,10 @@ internal sealed class CoordHarness
             Console.CancelKeyPress -= OnCancelKeyPress;
             _coordinator.StateChanged -= OnStateChanged;
             _radio.StatusChanged -= OnRadioStatusChanged;
-            _log.Info("coord harness shutting down (coordinator, then adapters, are disposed).");
+            _phoneAudio.Changed -= OnPhoneAudioChanged;
+            _outputs.DefaultEndpointChanged -= OnDefaultEndpointChanged;
+            _log.Info("coord harness shutting down (phone audio, coordinator, then adapters, are disposed).");
+            await _phoneAudio.DisposeAsync();
             await _coordinator.DisposeAsync();
         }
     }
@@ -109,10 +130,16 @@ internal sealed class CoordHarness
           state              coordinator state, error, reconnect schedule, radio, receiver
           auto on|off        AutoReconnect
           settings           open ms-settings:bluetooth
+          vol <0-100>        phone volume (every phone session on every output; nothing else)
+          mute on|off        phone mute (every phone session on every output; nothing else)
+          audio              phone sessions found, their volume/mute, peak, IsReceivingAudio
           quit               dispose everything and exit (Ctrl+C also works)
 
         Acceptance checks: connect + play audio; PC Bluetooth off -> Error(BluetoothOff);
         Bluetooth on -> reconnect within 30 s; walk out of range and back -> reconnects.
+        Audio: 'vol 30' / 'mute on' change only the phone; pause on the phone -> RECEIVING false
+        within ~3 s; switch the Windows default output -> 'audio' still shows 30 % / mute there.
+        (Volume/mute settings live in memory for this probe run only.)
 
         """);
 
@@ -181,6 +208,33 @@ internal sealed class CoordHarness
                         break;
                     case "settings":
                         _log.Info($"Open Bluetooth settings: {await _settings.OpenAsync(_quit.Token)}");
+                        break;
+                    case "vol":
+                        if (parts.Length < 2 || !int.TryParse(parts[1], out var percent) || percent is < 0 or > 100)
+                        {
+                            _log.Warn("Usage: vol <0-100>");
+                        }
+                        else
+                        {
+                            await _phoneAudio.SetVolumeAsync(percent, _quit.Token);
+                            await AudioAsync();
+                        }
+
+                        break;
+                    case "mute":
+                        if (parts.Length < 2 || parts[1] is not ("on" or "off"))
+                        {
+                            _log.Warn("Usage: mute on|off");
+                        }
+                        else
+                        {
+                            await _phoneAudio.SetMutedAsync(parts[1] == "on", _quit.Token);
+                            await AudioAsync();
+                        }
+
+                        break;
+                    case "audio":
+                        await AudioAsync();
                         break;
                     case "help" or "?":
                         PrintHelp();
@@ -254,6 +308,44 @@ internal sealed class CoordHarness
     }
 
     private void OnRadioStatusChanged(object? sender, RadioStatusChangedEventArgs e) => _log.Warn($"RADIO -> {e.Status}");
+
+    private async Task AudioAsync()
+    {
+        var endpoints = await _outputs.GetRenderEndpointsAsync(_quit.Token);
+        var status = await _sessions.GetPhoneAudioStatusAsync(_quit.Token);
+        var phone = _phoneAudio.Current;
+        _log.Info($"Phone audio: wanted volume {phone.VolumePercent}% muted={phone.Muted}; " +
+                  $"connection {_coordinator.CurrentState}; IsReceivingAudio={phone.IsReceivingAudio}; " +
+                  $"sessions available={status.Available}");
+        if (!status.Available)
+        {
+            _log.Warn("  No phone session found: connect and play something on the phone.");
+        }
+
+        foreach (var s in status.Sessions.OrderByDescending(s => s.IsOnDefaultEndpoint))
+        {
+            var name = endpoints.FirstOrDefault(e => string.Equals(e.Id, s.EndpointId, StringComparison.OrdinalIgnoreCase))?.Name ?? "(unknown output)";
+            _log.Info($"  \"{name}\"{(s.IsOnDefaultEndpoint ? " [DEFAULT]" : string.Empty)}: " +
+                      $"{(s.IsActive ? "Active" : "Inactive")} Vol={s.VolumePercent}% Mute={s.Muted}" +
+                      (s.IsOnDefaultEndpoint ? $" Peak={status.Peak:0.000}" : string.Empty));
+        }
+    }
+
+    private void OnPhoneAudioChanged(object? sender, PhoneAudioChangedEventArgs e)
+    {
+        if (e.Previous.IsReceivingAudio != e.Current.IsReceivingAudio)
+        {
+            _log.Ok($"RECEIVING AUDIO -> {e.Current.IsReceivingAudio} (connection {_coordinator.CurrentState})");
+        }
+
+        if (e.Previous.IsAvailable != e.Current.IsAvailable)
+        {
+            _log.Info($"Phone sessions available -> {e.Current.IsAvailable}");
+        }
+    }
+
+    private void OnDefaultEndpointChanged(object? sender, DefaultEndpointChangedEventArgs e) =>
+        _log.Warn($"DEFAULT OUTPUT -> \"{e.Endpoint?.Name ?? "(none)"}\" (phone volume/mute is re-applied there)");
 
     private void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
     {

@@ -1,5 +1,6 @@
 using DualAudio.Core.Abstractions;
 using DualAudio.Platform.Windows;
+using DualAudio.Platform.Windows.Audio;
 using DualAudio.Platform.Windows.Bluetooth;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -18,6 +19,10 @@ public sealed class RegistrationTests
         provider.GetRequiredService<IRadioMonitor>().Should().BeOfType<RadioMonitor>();
         provider.GetRequiredService<IClock>().Should().BeOfType<SystemClock>();
         provider.GetRequiredService<BluetoothSettingsLauncher>().Should().NotBeNull();
+        provider.GetRequiredService<IAudioSessionController>().Should().BeOfType<NAudioSessionController>();
+        provider.GetRequiredService<IOutputDeviceService>().Should().BeOfType<OutputDeviceService>()
+            .And.BeSameAs(provider.GetRequiredService<OutputDeviceService>());
+        provider.GetRequiredService<DefaultEndpointMasterVolume>().Should().NotBeNull();
     }
 
     [Fact]

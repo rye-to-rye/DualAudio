@@ -20,8 +20,8 @@ Dependencies point inward: App → Infrastructure, Platform.Windows → Core.
 | `IBluetoothAudioSourceWatcher` | `DeviceWatcher(AudioPlaybackConnection.GetDeviceSelector())` |
 | `IAudioReceiver` | `AudioPlaybackConnection` (TryCreateFromId → StartAsync → OpenAsync → Dispose) |
 | `IRadioMonitor` | `Windows.Devices.Radios.Radio` (read-only) |
-| `IAudioSessionController` | WASAPI sessions matched by `PhoneSessionMatcher`, on all render endpoints |
-| `IOutputDeviceService` | Render endpoints + default-endpoint notifications (read-only) |
+| `IAudioSessionController` | WASAPI sessions matched by `PhoneSessionMatcher`, on all render endpoints (`NAudioSessionController`) |
+| `IOutputDeviceService` | Render endpoints + default-endpoint and device-change notifications, read-only (`OutputDeviceService`) |
 | `IHotkeyService` | `RegisterHotKey` |
 | `ISettingsStore` | JSON file in `%LOCALAPPDATA%` |
 | `IClock` | Time / delays (fake in tests) |
@@ -90,3 +90,27 @@ timer callbacks enqueue work onto it; double-clicked Connect calls queue up and 
 Match on any render endpoint: process image `svchost.exe` **and** DisplayName contains `A2DP SNK`.
 The `%b{2EA30F40-6E9F-4709-9327-A4E880941760}` session GUID is reported as extra confirmation only
 (`PhoneSessionMatch.PrimaryAndGuid`) and never matches on its own. Never match on PID or "Microphone".
+
+## Phone volume / mute and "receiving audio"
+
+**Platform: `NAudioSessionController`** (`src/DualAudio.Platform.Windows/Audio/`). This class does all of its COM work on one dedicated MTA thread
+(`MtaWorker`). Core Audio callbacks (session created, default endpoint changed, endpoint added/removed/state,
+session state/expired) only post a rescan to that thread. A rescan enumerates the sessions on every active render
+endpoint, keeps the phone sessions, and writes the requested volume/mute to each one whose value differs. It never
+writes to a non-phone session. The requested values are remembered, so a session that appears later (reconnect,
+new default, new endpoint) gets them too. `PhoneSessionsChanged` fires when the phone session on the default endpoint
+appears, disappears, or changes between Active and Inactive. `GetPhoneAudioStatusAsync` returns every phone
+session's state plus the default session's peak. When no session exists, it returns `Available = false`.
+A change made in the Windows volume mixer is overwritten by the next re-apply.
+
+**Core: `PhoneAudioService`**
+- Loads `PhoneVolume`/`PhoneMuted` from `AppSettings` and applies them. Nothing is applied before `InitializeAsync`.
+- Persists every change. It re-reads the settings first, so other fields are kept.
+- Re-applies the saved values on every transition to Connected.
+- While Connected, and only then, it polls the status every 250 ms (the interval is clamped to at least 250 ms).
+- `IsReceivingAudio` is true when the default endpoint's phone session is Active and its peak was above 0.001
+  at least once in the last 3 s. It is separate from Connected: a paused phone stays Connected but stops receiving.
+- `Changed` follows the coordinator's rules: decided under one lock, raised after release, in order.
+
+`DefaultEndpointMasterVolume` is optional and controls the whole device. It changes the default output's master volume
+(game audio too) and is not used for phone volume.

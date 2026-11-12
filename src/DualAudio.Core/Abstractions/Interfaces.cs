@@ -61,23 +61,34 @@ public interface IRadioMonitor : IDisposable
 /// <summary>
 /// Controls the phone's audio session(s). Windows keeps one phone session per render endpoint, so
 /// volume/mute apply to ALL matching sessions (see <c>PhoneSessionMatcher</c>) and are re-applied when
-/// a new matching session appears or the default endpoint changes.
+/// a new matching session appears, the default endpoint changes, or an endpoint is added.
+/// Never touches a non-phone session. With no phone session the methods are no-ops (the requested
+/// volume/mute is remembered and applied once a session appears) and the status reports Available=false.
 /// </summary>
 public interface IAudioSessionController : IDisposable
 {
-    /// <summary>A phone session appeared or disappeared on some endpoint.</summary>
+    /// <summary>
+    /// The phone session on the default endpoint appeared, became Active/Inactive, or disappeared
+    /// (including because the default endpoint changed). Raised on a background thread.
+    /// </summary>
     event EventHandler? PhoneSessionsChanged;
 
     Task<IReadOnlyList<PhoneSessionInfo>> GetPhoneSessionsAsync(CancellationToken cancellationToken);
 
-    /// <param name="volumePercent">0..100.</param>
+    /// <param name="volumePercent">0..100 (clamped).</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     Task SetPhoneVolumeAsync(int volumePercent, CancellationToken cancellationToken);
 
     Task SetPhoneMutedAsync(bool muted, CancellationToken cancellationToken);
 
-    /// <summary>True when a phone session on the default endpoint is Active.</summary>
+    /// <summary>True when a phone session on the default endpoint is Active (not peak-based; see PhoneAudioService).</summary>
     Task<bool> IsReceivingAudioAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Every phone session's state plus the default-endpoint session's peak level. Cheap enough to poll
+    /// every 250 ms. Never throws for audio-stack failures: returns <see cref="PhoneAudioStatus.Unavailable"/>.
+    /// </summary>
+    Task<PhoneAudioStatus> GetPhoneAudioStatusAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -86,8 +97,13 @@ public interface IAudioSessionController : IDisposable
 /// </summary>
 public interface IOutputDeviceService : IDisposable
 {
+    /// <summary>The default render endpoint for the Multimedia role changed. Raised on a background thread.</summary>
     event EventHandler<DefaultEndpointChangedEventArgs>? DefaultEndpointChanged;
 
+    /// <summary>A render endpoint was added, removed, or changed state (e.g. headset unplugged). Raised on a background thread.</summary>
+    event EventHandler? DevicesChanged;
+
+    /// <summary>Active render endpoints only.</summary>
     Task<IReadOnlyList<AudioEndpoint>> GetRenderEndpointsAsync(CancellationToken cancellationToken);
 
     Task<AudioEndpoint?> GetDefaultEndpointAsync(CancellationToken cancellationToken);

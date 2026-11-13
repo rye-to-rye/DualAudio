@@ -22,6 +22,7 @@ public sealed class PerformanceBudgetTests
         coordinator.HealthCheckInterval.Should().BeGreaterThanOrEqualTo(TenSeconds);
         reconnect.SlowRetryInterval.Should().BeGreaterThanOrEqualTo(TenSeconds);
         coordinator.StaleSessionPollInterval.Should().BeGreaterThanOrEqualTo(PhoneAudioOptions.MinPollInterval);
+        PhoneAudioOptions.MinLevelInterval.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(100), "the level meter updates at most ~10 times a second");
         new PhoneAudioOptions { PollInterval = TimeSpan.FromMilliseconds(10) }.PollInterval.Should().Be(TimeSpan.FromMilliseconds(10),
             "the record keeps what was asked; the service clamps it (PhoneAudioServiceTests)");
     }

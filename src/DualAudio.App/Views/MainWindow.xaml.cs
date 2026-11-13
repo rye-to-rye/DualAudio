@@ -13,6 +13,11 @@ public partial class MainWindow
         Shell = shell;
         DataContext = viewModel;
         InitializeComponent();
+
+        // The phone level meter only updates while the window is on screen (shown and not minimized).
+        void UpdateMeterVisibility() => viewModel.DashboardLevel.SetVisible(IsVisible && WindowState != System.Windows.WindowState.Minimized);
+        IsVisibleChanged += (_, _) => UpdateMeterVisibility();
+        StateChanged += (_, _) => UpdateMeterVisibility();
     }
 
     public ShellViewModel Shell { get; }

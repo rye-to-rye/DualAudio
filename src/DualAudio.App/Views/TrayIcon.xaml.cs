@@ -13,6 +13,12 @@ public partial class TrayIcon
     {
         DataContext = viewModel;
         InitializeComponent();
+
+        // The flyout's level meter only updates while the flyout is open.
+        if (TrayPopup is { } flyout)
+        {
+            flyout.IsVisibleChanged += (_, e) => viewModel.Dashboard.FlyoutLevel.SetVisible(e.NewValue is true);
+        }
     }
 
     public void Show() => ForceCreate(enablesEfficiencyMode: false);

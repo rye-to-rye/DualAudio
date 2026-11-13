@@ -414,7 +414,120 @@ public sealed class PhoneAudioServiceTests : IAsyncDisposable
         _sut.VolumePercent.Should().Be(10);
     }
 
+    // ------------------------------------------------------------------ Level (phone level meter)
+
+    [Fact]
+    public async Task Level_follows_the_peak_while_connected()
+    {
+        var levels = RecordLevels();
+        _status = Status(active: true, peak: 0.3f);
+        await _h.ConnectFullyAsync();
+        await SettleAsync();
+
+        _sut.Level.Should().Be(0.3f);
+
+        _status = Status(active: true, peak: 0.6f);
+        await AdvanceAsync(Poll);
+
+        _sut.Level.Should().Be(0.6f);
+        levels.Select(l => l.Level).Should().Equal(0.3f, 0.6f);
+    }
+
+    [Fact]
+    public async Task Level_is_0_and_never_raised_while_not_connected()
+    {
+        var levels = RecordLevels();
+        _status = Status(active: true, peak: 0.5f);
+        await _sut.InitializeAsync();
+        _controller.PhoneSessionsChanged += Raise.Event();
+        await AdvanceAsync(TimeSpan.FromSeconds(2));
+
+        _sut.Level.Should().Be(0f);
+        levels.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Disconnect_drops_the_level_to_0_at_once_and_stops_level_events()
+    {
+        var levels = RecordLevels();
+        _status = Status(active: true, peak: 0.4f);
+        await _h.ConnectFullyAsync();
+        await SettleAsync();
+
+        await _h.Sut.DisconnectAsync();
+        await SettleAsync(); // no clock advance: the drop to 0 is not throttled
+
+        _sut.Level.Should().Be(0f);
+        levels.Select(l => l.Level).Should().Equal(0.4f, 0f);
+
+        await AdvanceAsync(TimeSpan.FromSeconds(2));
+        levels.Should().HaveCount(2, "nothing is raised while not Connected");
+    }
+
+    [Fact]
+    public async Task Level_events_are_throttled_to_at_most_10_per_second()
+    {
+        var levels = RecordLevels();
+        _status = Status(active: true, peak: 0.1f);
+        await _h.ConnectFullyAsync();
+        await SettleAsync();
+        var readsBefore = StatusReads;
+
+        // Every 50 ms a session event with a new peak (faster than the meter may update), for one second.
+        for (var i = 0; i < 20; i++)
+        {
+            _status = Status(active: true, peak: 0.2f + (i * 0.01f));
+            _controller.PhoneSessionsChanged += Raise.Event();
+            await SettleAsync();
+            _h.Clock.Advance(TimeSpan.FromMilliseconds(50));
+            await SettleAsync();
+        }
+
+        var times = levels.Select(l => l.At).ToList();
+        times.Should().HaveCountLessThanOrEqualTo(11, "~10 per second (+1 for the value at connect)");
+        times.Zip(times.Skip(1), (a, b) => b - a).Should().OnlyContain(gap => gap >= PhoneAudioOptions.MinLevelInterval);
+        (StatusReads - readsBefore).Should().Be(20 + 4, "the level adds no reads: only the session events and the 250 ms poll");
+    }
+
+    [Fact]
+    public async Task Level_keeps_showing_while_muted()
+    {
+        _status = Status(active: true, peak: 0.127f);
+        await _h.ConnectFullyAsync();
+        await SettleAsync();
+
+        // Hardware: muting makes Windows report the session Inactive while the peak stays > 0.
+        await _sut.SetMutedAsync(true);
+        _status = Status(active: false, peak: 0.127f);
+        await AdvanceAsync(Poll);
+
+        _sut.Level.Should().Be(0.127f);
+    }
+
+    [Fact]
+    public async Task Level_is_clamped_to_0_1()
+    {
+        _status = Status(active: true, peak: 1.7f);
+        await _h.ConnectFullyAsync();
+        await SettleAsync();
+
+        _sut.Level.Should().Be(1f);
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    private List<(float Level, DateTimeOffset At)> RecordLevels()
+    {
+        var levels = new List<(float, DateTimeOffset)>();
+        _sut.LevelChanged += (_, e) =>
+        {
+            lock (levels)
+            {
+                levels.Add((e.Level, _h.Clock.UtcNow));
+            }
+        };
+        return levels;
+    }
 
     private static PhoneAudioStatus Status(bool active, float peak, bool onDefault = true) =>
         new(

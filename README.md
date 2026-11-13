@@ -97,3 +97,10 @@ git push origin v0.1.1
 
 GitHub Actions builds, tests, packs and publishes the release with the installer and the update feed. Details and how
 to test an update locally: [RELEASING.md](RELEASING.md).
+
+## License
+
+DualAudio is released under the [MIT License](LICENSE). Copyright (c) 2026 Ryan Rahman.
+
+Third-party packages keep their own licenses; they are listed in the app under **Settings > About > Open-source
+licenses**.

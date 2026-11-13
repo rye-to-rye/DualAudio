@@ -565,7 +565,7 @@
 
     <!--
         Segmented meter for a 0..1 level (ProgressBar, Minimum 0, Maximum 1): 8 px segments, 3 px gaps, empty segments
-        Raised 2. Not used yet: no view model exposes the phone level (see the Prompt 9 summary).
+        Raised 2. Bound to DashboardViewModel.DashboardLevel / FlyoutLevel (PhoneAudioService.Level).
     -->
     <DrawingBrush x:Key="MeterSegmentsMask" TileMode="Tile" Stretch="None"
                   Viewport="0,0,11,10" ViewportUnits="Absolute" Viewbox="0,0,11,10" ViewboxUnits="Absolute">

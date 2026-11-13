@@ -6,6 +6,7 @@ using DualAudio.Core.Abstractions;
 using DualAudio.Core.Audio;
 using DualAudio.Core.Connection;
 using DualAudio.Core.Diagnostics;
+using DualAudio.Core.Hotkeys;
 using DualAudio.Core.Updates;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -31,6 +32,10 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
     private readonly IUiDispatcher _dispatcher;
     private readonly ILogger _logger;
     private readonly UpdateService? _updates;
+    private readonly HotkeyManager? _hotkeys;
+
+    // 1 while a level refresh is posted to the UI thread and not yet run (coalesces level events).
+    private int _levelPostPending;
 
     // UI-thread state.
     private string? _preferredDeviceId;
@@ -51,7 +56,8 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         ISystemSettingsLauncher launcher,
         IUiDispatcher dispatcher,
         ILogger<DashboardViewModel>? logger = null,
-        UpdateService? updates = null)
+        UpdateService? updates = null,
+        HotkeyManager? hotkeys = null)
     {
         _coordinator = coordinator;
         _phoneAudio = phoneAudio;
@@ -62,9 +68,18 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         _dispatcher = dispatcher;
         _logger = (ILogger?)logger ?? NullLogger.Instance;
         _updates = updates;
+        _hotkeys = hotkeys;
+        DashboardLevel = new PhoneLevelMeter(() => _phoneAudio.Level);
+        FlyoutLevel = new PhoneLevelMeter(() => _phoneAudio.Level);
 
         _coordinator.StateChanged += OnConnectionStateChanged;
         _phoneAudio.Changed += OnPhoneAudioChanged;
+        _phoneAudio.LevelChanged += OnPhoneLevelChanged;
+        if (_hotkeys is not null)
+        {
+            _hotkeys.Changed += OnHotkeysChanged;
+        }
+
         _watcher.DeviceAdded += OnDevicesChanged;
         _watcher.DeviceRemoved += OnDevicesChanged;
         _watcher.EnumerationCompleted += OnDevicesChanged;
@@ -77,9 +92,26 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         ApplyConnectionState();
         ApplyUpdates();
         ApplyPhoneAudio(_phoneAudio.Current);
+        ApplyHotkeys();
     }
 
     public ObservableCollection<DeviceItem> Devices { get; } = [];
+
+    /// <summary>"Phone level" meter on the dashboard's phone volume card (updated only while the main window is visible).</summary>
+    public PhoneLevelMeter DashboardLevel { get; }
+
+    /// <summary>Level meter under the tray flyout's volume slider (updated only while the flyout is open).</summary>
+    public PhoneLevelMeter FlyoutLevel { get; }
+
+    /// <summary>The mute/unmute shortcut, e.g. "Ctrl+Alt+M"; null when none is registered (so pressing it would do nothing).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasMuteShortcut), nameof(MuteShortcutKeys))]
+    private string? muteShortcut;
+
+    public bool HasMuteShortcut => MuteShortcut is not null;
+
+    /// <summary>The shortcut's keys for the dashboard's key chips: ["Ctrl", "Alt", "M"].</summary>
+    public IReadOnlyList<string> MuteShortcutKeys => MuteShortcut?.Split('+') ?? [];
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ConnectCommand), nameof(ForgetDeviceCommand))]
@@ -211,6 +243,12 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         _disposed = true;
         _coordinator.StateChanged -= OnConnectionStateChanged;
         _phoneAudio.Changed -= OnPhoneAudioChanged;
+        _phoneAudio.LevelChanged -= OnPhoneLevelChanged;
+        if (_hotkeys is not null)
+        {
+            _hotkeys.Changed -= OnHotkeysChanged;
+        }
+
         _watcher.DeviceAdded -= OnDevicesChanged;
         _watcher.DeviceRemoved -= OnDevicesChanged;
         _watcher.EnumerationCompleted -= OnDevicesChanged;
@@ -452,6 +490,49 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
     private void OnDevicesChanged(object? sender, EventArgs e) => _dispatcher.Post(RefreshDevices);
 
     private void OnUpdatesChanged(object? sender, EventArgs e) => _dispatcher.Post(ApplyUpdates);
+
+    private void OnHotkeysChanged(object? sender, EventArgs e) => _dispatcher.Post(ApplyHotkeys);
+
+    /// <summary>
+    /// Nothing is posted to the UI thread while neither meter is visible; otherwise at most one refresh is queued at a
+    /// time (it reads the newest level when it runs).
+    /// </summary>
+    private void OnPhoneLevelChanged(object? sender, PhoneLevelChangedEventArgs e)
+    {
+        if (!DashboardLevel.IsVisible && !FlyoutLevel.IsVisible)
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _levelPostPending, 1) == 0)
+        {
+            _dispatcher.Post(ApplyLevel);
+        }
+    }
+
+    private void ApplyLevel()
+    {
+        Volatile.Write(ref _levelPostPending, 0);
+        if (_disposed)
+        {
+            return;
+        }
+
+        DashboardLevel.Refresh();
+        FlyoutLevel.Refresh();
+    }
+
+    private void ApplyHotkeys()
+    {
+        if (_disposed || _hotkeys is null)
+        {
+            return;
+        }
+
+        MuteShortcut = _hotkeys.Current.TryGetValue(HotkeyAction.ToggleMute, out var state) && state.IsRegistered
+            ? HotkeyFormat.Format(state.Binding)
+            : null;
+    }
 
     private void ApplyUpdates()
     {

@@ -27,6 +27,12 @@ public sealed record PhoneAudioOptions
 
     /// <summary>Peak level (0..1) that counts as sound. Phase 0: ~0.127 while playing, 0.000 when quiet.</summary>
     public float PeakThreshold { get; init; } = DefaultPeakThreshold;
+
+    /// <summary>
+    /// <see cref="PhoneAudioService.LevelChanged"/> is raised at most once per this interval (~10 per second). The level
+    /// comes from the existing <see cref="PollInterval"/> poll; this only caps extra reads (session events, volume changes).
+    /// </summary>
+    public static readonly TimeSpan MinLevelInterval = TimeSpan.FromMilliseconds(100);
 }
 
 /// <summary>What the UI shows about phone audio.</summary>
@@ -45,6 +51,12 @@ public sealed class PhoneAudioChangedEventArgs(PhoneAudioSnapshot previous, Phon
     public PhoneAudioSnapshot Current { get; } = current;
 }
 
+/// <summary>The phone's peak level (0..1) for the level meter.</summary>
+public sealed class PhoneLevelChangedEventArgs(float level) : EventArgs
+{
+    public float Level { get; } = level;
+}
+
 /// <summary>
 /// Phone volume/mute (persisted, applied through <see cref="IAudioSessionController"/>, re-applied on every
 /// Connected) and "receiving audio" detection: while Connected, polls the controller's status every
@@ -52,6 +64,9 @@ public sealed class PhoneAudioChangedEventArgs(PhoneAudioSnapshot previous, Phon
 /// <para>Same event rules as <see cref="ConnectionCoordinator.StateChanged"/>: state changes are decided under one
 /// <see cref="SemaphoreSlim"/>, <see cref="Changed"/> is raised after it is released, in order, on a background
 /// thread, so handlers may call back into this service. Handlers marshal to the UI thread themselves.</para>
+/// <para>Also exposes the phone's peak <see cref="Level"/> for the level meter, taken from the same poll (no extra
+/// reads): raised through <see cref="LevelChanged"/> at most every <see cref="PhoneAudioOptions.MinLevelInterval"/>,
+/// only while Connected, and set to 0 (raised at once) when the connection ends.</para>
 /// </summary>
 public sealed class PhoneAudioService : IAsyncDisposable
 {
@@ -67,16 +82,19 @@ public sealed class PhoneAudioService : IAsyncDisposable
     // Guarded by _sync.
     private readonly object _sync = new();
     private readonly List<Task> _inFlight = [];
-    private readonly Queue<PhoneAudioChangedEventArgs> _pendingEvents = new();
+    private readonly Queue<EventArgs> _pendingEvents = new();
     private bool _dispatchingEvents;
 
     private volatile PhoneAudioSnapshot _snapshot = new(100, false, false, false);
+    private volatile float _level;
     private int _disposed;
 
     // Only touched while holding _lock.
     private bool _initialized;
     private CancellationTokenSource? _pollCts;
     private DateTimeOffset? _lastHeard;
+    private float _lastRaisedLevel;
+    private DateTimeOffset? _lastLevelRaisedAt;
 
     public PhoneAudioService(
         IAudioSessionController sessions,
@@ -105,6 +123,9 @@ public sealed class PhoneAudioService : IAsyncDisposable
 
     public event EventHandler<PhoneAudioChangedEventArgs>? Changed;
 
+    /// <summary>The phone level changed (at most ~10 per second, only while Connected; once more with 0 when it ends).</summary>
+    public event EventHandler<PhoneLevelChangedEventArgs>? LevelChanged;
+
     public PhoneAudioSnapshot Current => _snapshot;
 
     public int VolumePercent => _snapshot.VolumePercent;
@@ -114,6 +135,12 @@ public sealed class PhoneAudioService : IAsyncDisposable
     public bool IsReceivingAudio => _snapshot.IsReceivingAudio;
 
     public bool IsAvailable => _snapshot.IsAvailable;
+
+    /// <summary>
+    /// Peak level (0..1) of the phone audio on the default output, from the 250 ms poll; 0 while not Connected. Not
+    /// affected by the phone mute (Windows keeps metering a muted session), so the UI can show audio still arriving.
+    /// </summary>
+    public float Level => _level;
 
     /// <summary>The effective poll interval (after clamping).</summary>
     public TimeSpan PollInterval => _options.PollInterval;
@@ -332,6 +359,34 @@ public sealed class PhoneAudioService : IAsyncDisposable
         }
 
         Update(_snapshot with { IsReceivingAudio = receiving, IsAvailable = status.Available });
+        UpdateLevel(_pollCts is null ? 0f : Math.Clamp(status.Peak, 0f, 1f));
+    }
+
+    /// <summary>
+    /// Stores the level and queues <see cref="LevelChanged"/> when it differs from the last raised value and
+    /// <see cref="PhoneAudioOptions.MinLevelInterval"/> has passed. Dropping to 0 when polling stops is never throttled,
+    /// so a disconnected meter is always empty.
+    /// </summary>
+    private void UpdateLevel(float level)
+    {
+        _level = level;
+        if (level == _lastRaisedLevel)
+        {
+            return;
+        }
+
+        var now = _clock.UtcNow;
+        if (_pollCts is not null && _lastLevelRaisedAt is { } last && now - last < PhoneAudioOptions.MinLevelInterval)
+        {
+            return;
+        }
+
+        _lastRaisedLevel = level;
+        _lastLevelRaisedAt = now;
+        lock (_sync)
+        {
+            _pendingEvents.Enqueue(new PhoneLevelChangedEventArgs(level));
+        }
     }
 
     private async Task CallAsync(Func<CancellationToken, Task> call, string what, CancellationToken cancellationToken)
@@ -469,7 +524,7 @@ public sealed class PhoneAudioService : IAsyncDisposable
 
         while (true)
         {
-            PhoneAudioChangedEventArgs args;
+            EventArgs args;
             lock (_sync)
             {
                 if (!_pendingEvents.TryDequeue(out args!))
@@ -479,22 +534,35 @@ public sealed class PhoneAudioService : IAsyncDisposable
                 }
             }
 
-            var handler = Changed;
-            if (handler is null)
+            switch (args)
             {
-                continue;
+                case PhoneAudioChangedEventArgs changed:
+                    Raise(Changed, changed, nameof(Changed));
+                    break;
+                case PhoneLevelChangedEventArgs level:
+                    Raise(LevelChanged, level, nameof(LevelChanged));
+                    break;
             }
+        }
+    }
 
-            foreach (var subscriber in handler.GetInvocationList().Cast<EventHandler<PhoneAudioChangedEventArgs>>())
+    private void Raise<T>(EventHandler<T>? handler, T args, string name)
+        where T : EventArgs
+    {
+        if (handler is null)
+        {
+            return;
+        }
+
+        foreach (var subscriber in handler.GetInvocationList().Cast<EventHandler<T>>())
+        {
+            try
             {
-                try
-                {
-                    subscriber(this, args);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "PhoneAudio Changed subscriber threw");
-                }
+                subscriber(this, args);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "PhoneAudio {Event} subscriber threw", name);
             }
         }
     }

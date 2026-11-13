@@ -2,6 +2,7 @@ using DualAudio.App.Services;
 using DualAudio.App.ViewModels;
 using DualAudio.Core.Abstractions;
 using DualAudio.Core.Audio;
+using DualAudio.Core.Hotkeys;
 using DualAudio.Core.Settings;
 using DualAudio.Core.Tests.Fakes;
 using DualAudio.Core.Updates;
@@ -11,15 +12,21 @@ namespace DualAudio.App.Tests.ViewModels;
 /// <summary>A real ConnectionCoordinator + PhoneAudioService on NSubstitute platform fakes, driving the ViewModel.</summary>
 internal sealed class DashboardFixture : IAsyncDisposable
 {
-    public DashboardFixture(AppSettings? settings = null, bool queueUiWork = false, UpdateService? updates = null)
+    public DashboardFixture(AppSettings? settings = null, bool queueUiWork = false, UpdateService? updates = null, bool withHotkeys = false)
     {
         Store = new InMemorySettingsStore(settings);
         PhoneAudio = new PhoneAudioService(H.Sessions, H.Sut, Store, H.Clock);
         Outputs.GetDefaultEndpointAsync(default)
             .ReturnsForAnyArgs(Task.FromResult<AudioEndpoint?>(new AudioEndpoint("{0.0.0.00000000}.{headset}", "Headset Earphone", true)));
         Dispatcher = new TestDispatcher { QueueWork = queueUiWork };
-        Vm = new DashboardViewModel(H.Sut, PhoneAudio, H.Watcher, Outputs, Store, Launcher, Dispatcher, updates: updates);
+        Hotkeys = withHotkeys ? new HotkeyManager(HotkeyService, PhoneAudio, Store) : null;
+        Vm = new DashboardViewModel(H.Sut, PhoneAudio, H.Watcher, Outputs, Store, Launcher, Dispatcher, updates: updates, hotkeys: Hotkeys);
     }
+
+    public FakeHotkeyService HotkeyService { get; } = new();
+
+    /// <summary>A real HotkeyManager on <see cref="HotkeyService"/>; only when created <c>withHotkeys</c>.</summary>
+    public HotkeyManager? Hotkeys { get; }
 
     public CoordinatorHarness H { get; } = new();
 
@@ -72,6 +79,7 @@ internal sealed class DashboardFixture : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         Vm.Dispose();
+        Hotkeys?.Dispose();
         await PhoneAudio.DisposeAsync();
         await H.DisposeAsync();
     }

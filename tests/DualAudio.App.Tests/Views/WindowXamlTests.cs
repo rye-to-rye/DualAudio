@@ -61,7 +61,7 @@ public sealed class WindowXamlTests
                 controls.Contains(key).Should().BeTrue(key.ToString());
             }
 
-            // The level meter style works (it isn't placed in a window yet: no view model exposes the level).
+            // The level meter style works on its own (the windows bind it to the phone level; see the tests below).
             var meter = new ProgressBar { Style = (Style)controls["LevelMeter"], Value = 0.5, Width = 200 };
             Lay(meter, new Size(200, 10));
         });
@@ -372,6 +372,44 @@ public sealed class WindowXamlTests
         await f.SettleAsync();
 
         IconFile().Should().EndWith("Assets/DualAudio-muted.ico");
+    }
+
+    [Fact]
+    public async Task Level_meters_and_mute_shortcut_are_shown_in_the_dashboard_and_the_flyout()
+    {
+        await using var f = new DashboardFixture(withHotkeys: true);
+        await f.PhoneAudio.InitializeAsync();
+        await f.H.AddDeviceAsync();
+        await f.Vm.InitializeAsync();
+        await f.Hotkeys!.ApplyFromSettingsAsync();
+        f.Vm.DashboardLevel.SetVisible(true);
+        f.Vm.FlyoutLevel.SetVisible(true);
+        await f.H.ConnectFullyAsync();
+        f.H.SetPhoneSession(active: true, peak: 0.5f);
+        await f.AdvanceAsync(TimeSpan.FromMilliseconds(250));
+        await f.PhoneAudio.SetMutedAsync(true);
+        await f.SettleAsync();
+
+        RunSta(() =>
+        {
+            var window = new MainWindow(f.Vm, Shell());
+            LoadWindow(window);
+            var content = (FrameworkElement)window.Content;
+            Texts(content).Should().Contain(["Phone level", "or press", "Ctrl", "Alt", "M"]);
+            var meter = (ProgressBar)window.FindName("DashboardLevelMeter");
+            meter.Value.Should().BeApproximately(0.5, 1e-6);
+            meter.Opacity.Should().BeLessThan(1, "dimmed while muted");
+            window.Close();
+
+            using var tray = new TrayIcon(new AppVm.TrayViewModel(f.Vm, Shell()));
+            var flyout = tray.TrayPopup.Should().BeAssignableTo<FrameworkElement>().Subject;
+            flyout.DataContext = tray.DataContext;
+            Lay(flyout, new Size(360, 460));
+            Texts(flyout).Should().Contain("· Ctrl+Alt+M");
+            var flyoutMeter = (ProgressBar)tray.FindName("FlyoutLevelMeter");
+            flyoutMeter.Value.Should().BeApproximately(0.5, 1e-6);
+            flyoutMeter.Opacity.Should().BeLessThan(1, "dimmed while muted");
+        });
     }
 
     // ------------------------------------------------------------------ helpers

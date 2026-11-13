@@ -14,8 +14,9 @@ public sealed class StalePhoneSessionTests
     private static readonly TimeSpan Settle = new ConnectionCoordinatorOptions().LinkLossSettleWindow;
     private static readonly TimeSpan PrimingDelay = new ConnectionCoordinatorOptions().PrimingDelay;
 
-    // Hardware: reopening 1 s after the priming close failed with UnknownFailure 0x8007001F.
-    private static readonly OpenResult PhoneNotReady = OpenResult.Failed(ErrorKind.Unknown, "0x8007001F");
+    // Hardware: reopening 1 s after the priming close failed with UnknownFailure 0x8007001F, which the
+    // platform now maps to PhoneUnreachable.
+    private static readonly OpenResult PhoneNotReady = OpenResult.Failed(ErrorKind.PhoneUnreachable, "0x8007001F");
 
     [Fact]
     public void Priming_delay_defaults_to_3s_with_2_4_6s_retries()
@@ -65,7 +66,7 @@ public sealed class StalePhoneSessionTests
 
         h.OpenCalls.Should().Be(5, "the priming open plus 4 reopens");
         h.Sut.CurrentState.Should().Be(Disconnected);
-        h.Sut.LastError.Should().Be(ErrorKind.Unknown);
+        h.Sut.LastError.Should().Be(ErrorKind.PhoneUnreachable);
         h.Sut.IsReconnecting.Should().BeTrue("0x8007001F can mean 'phone not ready', so it is not terminal");
         h.States.Should().Equal(Enabling, Opening, Disconnected);
 

@@ -85,6 +85,25 @@ timer callbacks enqueue work onto it; double-clicked Connect calls queue up and 
 `Error` states and `Disconnected` after a failed reconnect attempt carry an `ErrorKind`; the UI shows
 `ErrorMessages.For(kind)` (title + one actionable sentence; no HRESULTs in titles).
 
+`OpenAsync` UnknownFailure with ExtendedError 0x8007001F (ERROR_GEN_FAILURE) maps to `ErrorKind.PhoneUnreachable`
+("Can't reach your phone"): on hardware it means phone Bluetooth off, out of range, or not ready yet (BUG-003).
+It is retryable exactly like `Unknown`, including the BUG-001 priming reopen retries.
+
+## App (`src/DualAudio.App`)
+
+- `Program.Main`: single instance (named Mutex `Local\DualAudio.SingleInstance.v1`; a second launch sets the
+  `Local\DualAudio.Activate.v1` event, which brings the first window to the front), then the Generic Host.
+- `AppServices.AddDualAudioApp`: Infrastructure (JSON settings, Serilog to `%LOCALAPPDATA%\DualAudio\logs`),
+  `AddWindowsPlatform`, Core (`ConnectionCoordinator` **with** `IAudioSessionController`, `PhoneAudioService`), UI.
+  `StartupChecks.Verify` refuses to start if the coordinator lacks the session controller (BUG-001 priming).
+- `DualAudioRuntime`: starts phone audio, radio and watcher after all subscribers exist, auto-connects
+  `AppSettings.PreferredDeviceId` (saved on every Connect) when `AutoConnectOnStart`; on exit disposes phone audio,
+  then the coordinator (connection closed and disposed, awaited) before the host and the process go away.
+- `DashboardViewModel`: the only place service events are marshalled to the UI dispatcher (`IUiDispatcher`); it
+  re-reads service state on each event. All service calls run on the thread pool and never throw into the UI.
+- Settings: `JsonSettingsStore` writes `settings.json.tmp` then `File.Replace`; a corrupt file is renamed to
+  `settings.json.corrupt-<UTC>.bak` and defaults are used.
+
 ## Phone audio session rule (`PhoneSessionMatcher`)
 
 Match on any render endpoint: process image `svchost.exe` **and** DisplayName contains `A2DP SNK`.

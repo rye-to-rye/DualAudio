@@ -7,12 +7,25 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>DualAudio.App</RootNamespace>
     <AssemblyName>DualAudio</AssemblyName>
+    <!-- Program.Main owns startup (single instance + Generic Host), so App.xaml is a plain Page. -->
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <StartupObject>DualAudio.App.Program</StartupObject>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="WPF-UI" Version="4.0.3" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\DualAudio.Core\DualAudio.Core.csproj" />
     <ProjectReference Include="..\DualAudio.Infrastructure\DualAudio.Infrastructure.csproj" />
     <ProjectReference Include="..\DualAudio.Platform.Windows\DualAudio.Platform.Windows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DualAudio.App.Tests" />
   </ItemGroup>
 
 </Project>

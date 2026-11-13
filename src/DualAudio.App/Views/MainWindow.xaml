@@ -1,0 +1,131 @@
+<ui:FluentWindow x:Class="DualAudio.App.Views.MainWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                 xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 xmlns:vm="clr-namespace:DualAudio.App.ViewModels"
+                 xmlns:views="clr-namespace:DualAudio.App.Views"
+                 mc:Ignorable="d"
+                 d:DataContext="{d:DesignInstance Type=vm:DashboardViewModel}"
+                 Title="DualAudio"
+                 Width="480" Height="680" MinWidth="420" MinHeight="520"
+                 WindowStartupLocation="CenterScreen"
+                 ExtendsContentIntoTitleBar="True"
+                 WindowBackdropType="Mica"
+                 WindowCornerPreference="Round">
+    <ui:FluentWindow.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <views:StatusKindToBrushConverter x:Key="StatusBrush" />
+    </ui:FluentWindow.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="DualAudio" ShowMaximize="False" />
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="20,4,20,20">
+
+                <!-- Status pill -->
+                <Border HorizontalAlignment="Left" CornerRadius="14" Padding="14,6"
+                        Background="{Binding StatusKind, Converter={StaticResource StatusBrush}}"
+                        AutomationProperties.Name="Connection status">
+                    <TextBlock Text="{Binding StatusText}" Foreground="White" FontSize="14" FontWeight="SemiBold" />
+                </Border>
+
+                <!-- Error banner -->
+                <Border Margin="0,12,0,0" Padding="14,12" CornerRadius="6" BorderThickness="1"
+                        BorderBrush="#80C42B1C" Background="#33C42B1C"
+                        Visibility="{Binding IsErrorVisible, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                        <TextBlock Text="{Binding Error.Title}" FontWeight="SemiBold" FontSize="15" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,4,0,0" Text="{Binding Error.Message}" TextWrapping="Wrap" Opacity="0.9" />
+                        <ui:Button Margin="0,10,0,0" Content="{Binding Error.ActionLabel}"
+                                   Command="{Binding ErrorActionCommand}"
+                                   Visibility="{Binding HasErrorAction, Converter={StaticResource BoolToVisibility}}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Phone -->
+                <ui:Card Margin="0,16,0,0">
+                    <StackPanel>
+                        <TextBlock Text="Phone" FontSize="16" FontWeight="SemiBold" />
+                        <ComboBox Margin="0,10,0,0" ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}"
+                                  DisplayMemberPath="Name" AutomationProperties.Name="Phone"
+                                  IsEnabled="{Binding IsConnectVisible}" />
+                        <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
+                            <ui:Button Content="Connect" Appearance="Primary" MinWidth="110"
+                                       Command="{Binding ConnectCommand}"
+                                       Visibility="{Binding IsConnectVisible, Converter={StaticResource BoolToVisibility}}" />
+                            <ui:Button Content="Disconnect" MinWidth="110"
+                                       Command="{Binding DisconnectCommand}"
+                                       Visibility="{Binding IsDisconnectVisible, Converter={StaticResource BoolToVisibility}}" />
+                            <ui:Button Margin="8,0,0,0" Content="Add a phone" Appearance="Secondary"
+                                       Command="{Binding AddPhoneCommand}"
+                                       ToolTip="Pair a phone in Windows Settings &gt; Bluetooth &amp; devices" />
+                        </StackPanel>
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- Phone volume -->
+                <ui:Card Margin="0,12,0,0">
+                    <Grid ToolTip="{Binding PhoneAudioToolTip}" ToolTipService.ShowOnDisabled="True" Background="Transparent">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <DockPanel Grid.Row="0">
+                            <Border DockPanel.Dock="Right" Padding="8,2" CornerRadius="4" Background="#A4262C"
+                                    Visibility="{Binding IsMuted, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="Muted" Foreground="White" FontWeight="SemiBold" />
+                            </Border>
+                            <TextBlock Text="Phone volume" FontSize="16" FontWeight="SemiBold" />
+                        </DockPanel>
+                        <DockPanel Grid.Row="1" Margin="0,10,0,0" IsEnabled="{Binding IsPhoneAudioAvailable}">
+                            <ToggleButton DockPanel.Dock="Right" Margin="12,0,0,0" MinWidth="80"
+                                          IsChecked="{Binding IsMuted}" AutomationProperties.Name="Mute phone">
+                                <ToggleButton.Style>
+                                    <Style TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
+                                        <Setter Property="Content" Value="Mute" />
+                                        <Style.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter Property="Content" Value="Unmute" />
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ToggleButton.Style>
+                            </ToggleButton>
+                            <TextBlock DockPanel.Dock="Right" Width="44" Margin="8,0,0,0" VerticalAlignment="Center"
+                                       TextAlignment="Right" Text="{Binding PhoneVolume, StringFormat={}{0}%}" />
+                            <Slider Minimum="0" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True"
+                                    SmallChange="1" LargeChange="10" VerticalAlignment="Center"
+                                    Value="{Binding PhoneVolume}" AutomationProperties.Name="Phone volume" />
+                        </DockPanel>
+                    </Grid>
+                </ui:Card>
+
+                <!-- Output -->
+                <ui:Card Margin="0,12,0,0">
+                    <StackPanel>
+                        <TextBlock Text="Output" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Margin="0,8,0,0" TextWrapping="Wrap">
+                            <Run Text="Phone audio plays on" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            <LineBreak />
+                            <Run Text="{Binding OutputDeviceName, Mode=OneWay}" FontWeight="SemiBold" />
+                        </TextBlock>
+                        <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Text="DualAudio follows the Windows default output. Change it in Sound settings or per app." />
+                        <ui:Button Margin="0,10,0,0" Content="Per-app output settings"
+                                   Command="{Binding OpenPerAppOutputSettingsCommand}" />
+                    </StackPanel>
+                </ui:Card>
+
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</ui:FluentWindow>

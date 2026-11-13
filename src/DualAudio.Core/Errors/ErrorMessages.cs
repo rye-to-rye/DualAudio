@@ -28,6 +28,9 @@ public static class ErrorMessages
         ErrorKind.DeniedBySystem => new(
             "Windows blocked the connection",
             "Close other apps that use Bluetooth audio, then try again."),
+        ErrorKind.PhoneUnreachable => new(
+            "Can't reach your phone",
+            "Is Bluetooth on and is it nearby? Turn on your phone's Bluetooth and keep it close to the PC, then try again."),
         ErrorKind.Unknown => new(
             "Couldn't connect to your phone",
             "Try again; if it keeps happening, turn Bluetooth off and on again."),

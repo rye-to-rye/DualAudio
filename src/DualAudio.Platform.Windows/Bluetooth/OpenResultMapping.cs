@@ -16,6 +16,7 @@ internal static class OpenResultMapping
     internal const int Timeout = unchecked((int)0x800705B4);             // ERROR_TIMEOUT
     internal const int SemaphoreTimeout = unchecked((int)0x80070079);    // ERROR_SEM_TIMEOUT
     internal const int NotSupported = unchecked((int)0x80070032);        // ERROR_NOT_SUPPORTED
+    internal const int GenFailure = unchecked((int)0x8007001F);          // ERROR_GEN_FAILURE (BUG-003: phone unreachable)
 
     /// <summary>Maps the result of <c>AudioPlaybackConnection.OpenAsync</c>. The HRESULT goes into Detail only.</summary>
     public static OpenResult FromStatus(AudioPlaybackConnectionOpenResultStatus status, int extendedErrorHResult)
@@ -29,6 +30,8 @@ internal static class OpenResultMapping
             AudioPlaybackConnectionOpenResultStatus.Success => OpenResult.Ok(),
             AudioPlaybackConnectionOpenResultStatus.RequestTimedOut => OpenResult.Failed(ErrorKind.OpenTimedOut, detail),
             AudioPlaybackConnectionOpenResultStatus.DeniedBySystem => OpenResult.Failed(ErrorKind.DeniedBySystem, detail),
+            AudioPlaybackConnectionOpenResultStatus.UnknownFailure when extendedErrorHResult == GenFailure =>
+                OpenResult.Failed(ErrorKind.PhoneUnreachable, detail),
             AudioPlaybackConnectionOpenResultStatus.UnknownFailure => OpenResult.Failed(ErrorKind.Unknown, detail),
             _ => OpenResult.Failed(ErrorKind.Unknown, detail),
         };
@@ -44,6 +47,7 @@ internal static class OpenResultMapping
         AccessDenied => ErrorKind.DeniedBySystem,
         Timeout or SemaphoreTimeout => ErrorKind.OpenTimedOut,
         NotSupported => ErrorKind.SinkNotSupported,
+        GenFailure => ErrorKind.PhoneUnreachable,
         _ => ErrorKind.Unknown,
     };
 }

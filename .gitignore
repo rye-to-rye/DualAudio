@@ -483,3 +483,11 @@ $RECYCLE.BIN/
 
 # DualAudio.Probe log file
 probe-log.txt
+
+# Release builds
+DualAudio-app/
+*.zip
+
+# Release builds
+DualAudio-app/
+*.zip

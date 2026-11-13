@@ -38,7 +38,18 @@ public sealed class OpenResultMappingTests
         result.Detail.Should().Contain("0x8007048F");
     }
 
+    [Fact]
+    public void UnknownFailure_with_0x8007001F_maps_to_PhoneUnreachable()
+    {
+        // BUG-003: phone Bluetooth off / out of range surfaces as UnknownFailure + ERROR_GEN_FAILURE.
+        var result = OpenResultMapping.FromStatus(AudioPlaybackConnectionOpenResultStatus.UnknownFailure, unchecked((int)0x8007001F));
+
+        result.ErrorKind.Should().Be(ErrorKind.PhoneUnreachable);
+        result.Detail.Should().Contain("0x8007001F");
+    }
+
     [Theory]
+    [InlineData(0x8007001Fu, ErrorKind.PhoneUnreachable)]
     [InlineData(0x80070490u, ErrorKind.DeviceNotFound)]
     [InlineData(0x8007048Fu, ErrorKind.DeviceNotFound)]
     [InlineData(0x800710DFu, ErrorKind.DeviceNotFound)]

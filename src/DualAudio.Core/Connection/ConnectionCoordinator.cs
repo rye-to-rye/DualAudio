@@ -118,6 +118,12 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
 
     public bool IsReconnecting => _reconnect.IsPending;
 
+    /// <summary>
+    /// True when an <see cref="IAudioSessionController"/> was supplied, so the BUG-001 stale-session priming,
+    /// the post-connect safety net and the shutdown session check run. The app asserts this at startup.
+    /// </summary>
+    public bool IsStaleSessionPrimingEnabled => _sessions is not null;
+
     public DateTimeOffset? NextReconnectAt => _reconnect.NextAttemptAt;
 
     /// <summary>Reconnect automatically after an unexpected link loss. Can be changed at runtime.</summary>
@@ -218,7 +224,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     };
 
     private static bool IsRetryable(ErrorKind kind) =>
-        kind is ErrorKind.OpenTimedOut or ErrorKind.DeviceNotFound or ErrorKind.Unknown;
+        kind is ErrorKind.OpenTimedOut or ErrorKind.DeviceNotFound or ErrorKind.Unknown or ErrorKind.PhoneUnreachable;
 
     // ---------------------------------------------------------------- serialization
 
@@ -618,15 +624,15 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     }
 
     /// <summary>
-    /// A priming reopen failed (receiver already closed). Retryable failures (Unknown, e.g. 0x8007001F, and
-    /// OpenTimedOut) are retried while staying in Opening; after the last one the coordinator goes Disconnected
+    /// A priming reopen failed (receiver already closed). Retryable failures (Unknown, PhoneUnreachable =
+    /// 0x8007001F, and OpenTimedOut) are retried while staying in Opening; after the last one the coordinator goes Disconnected
     /// and hands over to the reconnect policy instead of a terminal Error. Returns false if not handled here.
     /// </summary>
     private bool TryHandlePrimingReopenFailure(ErrorKind kind, string? detail)
     {
         var number = _primingReopenNumber;
         _primingReopenNumber = 0;
-        if (number == 0 || kind is not (ErrorKind.Unknown or ErrorKind.OpenTimedOut))
+        if (number == 0 || kind is not (ErrorKind.Unknown or ErrorKind.PhoneUnreachable or ErrorKind.OpenTimedOut))
         {
             return false;
         }

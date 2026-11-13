@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DualAudio.Core.Tests" />
+    <InternalsVisibleTo Include="DualAudio.App.Tests" />
   </ItemGroup>
 
 </Project>

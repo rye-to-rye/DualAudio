@@ -100,3 +100,28 @@ Optional negative checks:
   to AirPods / power saving)? Needs a controlled A/B: old probe vs `coord`, 5 min each, same conditions, AirPods away.
 - **Note:** auto-reconnecting immediately after a phone-initiated close may also be fighting the phone; consider waiting for
   the phone to start playback again, or a longer first backoff, once the cause is known.
+
+## MVP acceptance (Prompt 6: dashboard app)
+
+Run: `dotnet run --project src/DualAudio.App` (closing the window exits the app).
+Logs: `%LOCALAPPDATA%\DualAudio\logs\dualaudio-<date>.log`. Settings: `%LOCALAPPDATA%\DualAudio\settings.json`.
+
+| # | Check | How | Expected | Pass/Fail | Notes |
+|---|-------|-----|----------|-----------|-------|
+| 1 | App launches | `dotnet run --project src/DualAudio.App` | Dark window; pill "Disconnected"; phone listed; output device shown | | |
+| 2 | Single instance | Launch a second time | No second window; the first one comes to the front | | |
+| 3 | Connect (button) | Select phone, **Connect** | Pill: Connecting… then Connected; both buttons disabled while connecting | | |
+| 4 | Phone + game in one headset | Play TikTok on the phone + a game/YouTube on the PC | Both audible in the headset; pill "Receiving audio" | | |
+| 5 | Phone volume only | Move slider to ~20 | Only phone audio gets quieter; game unchanged | | |
+| 6 | Phone mute only | **Mute** | Phone silent, game unchanged; red "Muted" badge; pill "… · Muted" | | |
+| 7 | Settings survive restart | Set 35 % + mute, close, relaunch | Slider 35 %, Muted, applied after connect | | |
+| 8 | Disconnect/reconnect x10 | Disconnect / Connect 10 times, no restart | Every reconnect plays audio within a few s; UI never freezes | | count: /10 |
+| 9 | PC Bluetooth off | Turn PC Bluetooth off while playing | One banner "Bluetooth is off" + "Open Bluetooth settings"; no crash | | |
+| 10 | Recovery | Turn PC Bluetooth back on | Banner clears; reconnects by itself (Connecting… then Connected) | | |
+| 11 | Phone Bluetooth off | Turn the phone's Bluetooth off | "Reconnecting…" + "Can't reach your phone … retrying automatically" (not "turn Bluetooth off and on") | | |
+| 12 | BUG-001 fresh start | Connected + playing, close the app, relaunch | Auto-connects to the remembered phone; audio plays without manual reconnect | | log: `stale phone session detected; priming reconnect`? |
+| 13 | Clean exit | Close the window while connected | Process exits within a few s; log ends with `Shutdown complete` | | |
+| 14 | Add a phone / per-app output | Click both buttons | Settings > Bluetooth & devices / App volume and device preferences open | | |
+| 15 | UI never freezes | Throughout | Window stays responsive in every step | | |
+
+**MVP status:** NOT YET ACCEPTED (fill in the table above).

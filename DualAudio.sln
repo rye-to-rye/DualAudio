@@ -23,6 +23,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DualAudio.Core.Tests", "tes
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DualAudio.Platform.Tests", "tests\DualAudio.Platform.Tests\DualAudio.Platform.Tests.csproj", "{4E27DCD3-2EAA-4E89-A8AB-7BF9A95F360D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DualAudio.App.Tests", "tests\DualAudio.App.Tests\DualAudio.App.Tests.csproj", "{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -117,6 +119,18 @@ Global
 		{4E27DCD3-2EAA-4E89-A8AB-7BF9A95F360D}.Release|x64.Build.0 = Release|Any CPU
 		{4E27DCD3-2EAA-4E89-A8AB-7BF9A95F360D}.Release|x86.ActiveCfg = Release|Any CPU
 		{4E27DCD3-2EAA-4E89-A8AB-7BF9A95F360D}.Release|x86.Build.0 = Release|Any CPU
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}.Debug|x64.Build.0 = Debug|Any CPU
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}.Debug|x86.Build.0 = Debug|Any CPU
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}.Release|x64.ActiveCfg = Release|Any CPU
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}.Release|x64.Build.0 = Release|Any CPU
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}.Release|x86.ActiveCfg = Release|Any CPU
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -129,5 +143,6 @@ Global
 		{20B68686-20F1-4640-A64B-7D52FB848524} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{E50BCE1C-619F-4CD8-9989-894637A07434} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{4E27DCD3-2EAA-4E89-A8AB-7BF9A95F360D} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{A1BFE5C7-0604-4C79-AA1E-0C353EA8726E} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

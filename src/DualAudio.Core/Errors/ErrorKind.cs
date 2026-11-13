@@ -10,5 +10,11 @@ public enum ErrorKind
     DeviceNotFound,
     OpenTimedOut,
     DeniedBySystem,
+
+    /// <summary>
+    /// OpenAsync failed with UnknownFailure 0x8007001F (ERROR_GEN_FAILURE). On hardware this is what a phone with
+    /// Bluetooth off, out of range, or not ready yet produces (BUG-003). Retryable, like <see cref="Unknown"/>.
+    /// </summary>
+    PhoneUnreachable,
     Unknown,
 }

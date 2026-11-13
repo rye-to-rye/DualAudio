@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>DualAudio.App.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="NSubstitute" Version="5.3.0" />
+    <!-- Pinned to 7.x: 8.x+ requires a paid commercial license. -->
+    <PackageReference Include="FluentAssertions" Version="7.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="FluentAssertions" />
+    <Using Include="NSubstitute" />
+    <!-- WPF projects drop System.IO from the implicit usings. -->
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <!-- Reuse the Core test fakes (coordinator harness, fake clock, in-memory settings) instead of copying them. -->
+  <ItemGroup>
+    <Compile Include="..\DualAudio.Core.Tests\Fakes\CoordinatorHarness.cs" Link="Fakes\CoordinatorHarness.cs" />
+    <Compile Include="..\DualAudio.Core.Tests\Fakes\FakeClock.cs" Link="Fakes\FakeClock.cs" />
+    <Compile Include="..\DualAudio.Core.Tests\Fakes\InMemorySettingsStore.cs" Link="Fakes\InMemorySettingsStore.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DualAudio.App\DualAudio.App.csproj" />
+  </ItemGroup>
+
+</Project>

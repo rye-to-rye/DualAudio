@@ -37,7 +37,11 @@ public static class AppServices
             new Win32HotkeyService(Application.Current.Dispatcher, sp.GetService<ILogger<Win32HotkeyService>>()));
         services.TryAddSingleton<IAppShell>(_ => (IAppShell)Application.Current);
         services.TryAddSingleton<IConfirmDialog, MessageBoxConfirmDialog>();
-        services.TryAddSingleton<ShellViewModel>();
+        services.TryAddSingleton(sp => new ShellViewModel(
+            sp.GetRequiredService<ISettingsStore>(),
+            sp.GetRequiredService<IAppShell>(),
+            sp.GetService<ILogger<ShellViewModel>>(),
+            () => sp.GetRequiredService<SettingsViewModel>()));
         services.TryAddSingleton<TrayViewModel>();
         services.TryAddSingleton<TrayIcon>();
         services.TryAddTransient<SettingsViewModel>();

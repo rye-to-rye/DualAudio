@@ -32,7 +32,6 @@ public partial class App : IAppShell
     private MainWindow? _window;
     private OnboardingWindow? _onboarding;
     private OnboardingViewModel? _onboardingViewModel;
-    private SettingsWindow? _settingsWindow;
     private TrayIcon? _tray;
     private bool _onboardingFinished;
     private bool _dashboardInitialized;
@@ -76,6 +75,7 @@ public partial class App : IAppShell
             // Constructed (and subscribed to the services) before the platform starts raising events.
             services.GetRequiredService<DashboardViewModel>();
             await Shell.InitializeAsync();
+            Shell.SettingsChanged += OnSettingsChanged;
 
             _tray = services.GetRequiredService<TrayIcon>();
             _tray.Show();
@@ -157,31 +157,6 @@ public partial class App : IAppShell
         _window.BringToFront();
     }
 
-    public void ShowSettings()
-    {
-        if (_shuttingDown)
-        {
-            return;
-        }
-
-        if (_settingsWindow is not null)
-        {
-            _settingsWindow.BringToFront();
-            return;
-        }
-
-        var viewModel = _host.Services.GetRequiredService<SettingsViewModel>();
-        viewModel.SettingsChanged += OnSettingsChanged;
-        _settingsWindow = new SettingsWindow(viewModel);
-        _settingsWindow.Closed += (_, _) =>
-        {
-            viewModel.SettingsChanged -= OnSettingsChanged;
-            _settingsWindow = null;
-        };
-        _settingsWindow.Show();
-        _ = viewModel.InitializeAsync();
-    }
-
     public async Task ExitAsync()
     {
         if (_shuttingDown)
@@ -192,7 +167,6 @@ public partial class App : IAppShell
         _shuttingDown = true;
         _window?.Hide();
         _onboarding?.Hide();
-        _settingsWindow?.Close();
         await ShutdownServicesAsync();
 
         // Only after the connection is released: the tray icon is the last thing to go.
@@ -240,7 +214,7 @@ public partial class App : IAppShell
             var window = _onboarding;
             _onboarding = null;
             await InitializeDashboardAsync();
-            ShowMainWindow();
+            Shell.OpenMainCommand.Execute(null); // on the dashboard, even if tray "Settings" was used during setup
             window?.Close();
             viewModel.Dispose();
             _onboardingViewModel = null;

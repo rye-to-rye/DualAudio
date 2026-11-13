@@ -69,15 +69,15 @@ public sealed class ShellViewModelTests
     }
 
     [Fact]
-    public async Task Open_and_Settings_go_to_the_shell()
+    public async Task Open_and_Settings_show_the_main_window()
     {
         var sut = await CreateAsync(new InMemorySettingsStore());
 
         sut.OpenMainCommand.Execute(null);
         sut.OpenSettingsCommand.Execute(null);
 
-        _shell.Received(1).ShowMainWindow();
-        _shell.Received(1).ShowSettings();
+        _shell.Received(2).ShowMainWindow();
+        sut.CurrentPage.Should().Be(ShellPage.Settings);
     }
 
     private async Task<ShellViewModel> CreateAsync(InMemorySettingsStore store)

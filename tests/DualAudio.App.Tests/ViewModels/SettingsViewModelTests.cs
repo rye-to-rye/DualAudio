@@ -105,6 +105,30 @@ public sealed class SettingsViewModelTests : IAsyncLifetime
         _store.Current.HotkeyFor(HotkeyAction.ToggleMute)!.VirtualKey.Should().Be(0x55);
     }
 
+    [Theory]
+    [InlineData(0x55, "Ctrl+Alt+U", null)] // changed
+    [InlineData(0x4D, "Ctrl+Alt+M", null)] // unchanged (same combination)
+    [InlineData(0x22, "Ctrl+Alt+M", SettingsViewModel.DuplicateMessage)] // Ctrl+Alt+PgDn: another DualAudio shortcut
+    public async Task Recorder_shows_Press_keys_then_the_final_combination_once_with_no_flash(int virtualKey, string finalKeys, string? message)
+    {
+        var row = _sut.Hotkeys[0];
+        _sut.BeginRecordingCommand.Execute(row);
+        row.Keys.Should().Be("Press keys…");
+        var seen = new List<string>();
+        row.PropertyChanged += (_, e) => seen.Add($"{e.PropertyName}={(e.PropertyName == nameof(HotkeyRow.IsRecording) ? row.IsRecording : row.Keys)}|{row.Keys}");
+
+        await _sut.CompleteRecordingAsync(CtrlAlt, virtualKey);
+
+        // The button text goes straight from the prompt to the final combination, and only then leaves the recording
+        // look; the Changed refresh during the change must not touch the row.
+        seen.Where(s => s.StartsWith("Keys=", StringComparison.Ordinal)).Should().Equal($"Keys={finalKeys}|{finalKeys}");
+        seen.Should().ContainSingle(s => s.StartsWith("IsRecording=", StringComparison.Ordinal))
+            .Which.Should().Be($"IsRecording=False|{finalKeys}");
+        seen.FindIndex(s => s.StartsWith("Keys=", StringComparison.Ordinal))
+            .Should().BeLessThan(seen.FindIndex(s => s.StartsWith("IsRecording=", StringComparison.Ordinal)));
+        row.Message.Should().Be(message);
+    }
+
     [Fact]
     public async Task Combination_used_by_another_app_shows_in_use_and_keeps_the_previous_binding()
     {

@@ -13,9 +13,34 @@ public enum StatusKind
     Error,
 }
 
+/// <summary>Traffic-light colour of a connection status (Good = green, Warn = yellow, Bad = red). The text always stays.</summary>
+public enum StatusTone
+{
+    /// <summary>Connected and receiving audio (also while muted: Muted is shown separately).</summary>
+    Good,
+
+    /// <summary>Connected but nothing playing, or connecting / reconnecting / priming / waiting for the phone.</summary>
+    Warn,
+
+    /// <summary>Not connected: disconnected, phone not found, Bluetooth off, any error.</summary>
+    Bad,
+}
+
+public static class StatusTones
+{
+    public static StatusTone For(StatusKind kind) => kind switch
+    {
+        StatusKind.Receiving => StatusTone.Good,
+        StatusKind.Connected or StatusKind.Connecting => StatusTone.Warn,
+        _ => StatusTone.Bad,
+    };
+}
+
 /// <summary>Status pill: colour + text. Pure, so every state is unit-tested.</summary>
 public sealed record DashboardStatus(StatusKind Kind, string Text)
 {
+    public StatusTone Tone => StatusTones.For(Kind);
+
     public static DashboardStatus From(ConnectionState state, bool isReconnecting, bool isReceivingAudio, bool muted, bool gaveUp = false)
     {
         var mutedSuffix = muted ? " · Muted" : string.Empty;

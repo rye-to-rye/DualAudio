@@ -160,6 +160,10 @@ public sealed partial class OnboardingViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string connectStatus = string.Empty;
 
+    /// <summary>Colour of the status row: green = hearing audio, yellow = connected / connecting, red = not connected.</summary>
+    [ObservableProperty]
+    private StatusTone connectTone = StatusTone.Warn;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsConnectErrorVisible))]
     private ErrorMessage? connectError;
@@ -389,6 +393,7 @@ public sealed partial class OnboardingViewModel : ObservableObject, IDisposable
         IsNoAudioHelpVisible = false;
         ConnectError = null;
         ConnectStatus = $"Connecting to {device.Name}…";
+        ConnectTone = StatusTone.Warn;
         _logger.LogInformation("Onboarding: connecting to {Device}", LogRedaction.DeviceId(device.Id));
 
         if (fresh)
@@ -452,15 +457,19 @@ public sealed partial class OnboardingViewModel : ObservableObject, IDisposable
                 break;
             case ConnectionState.Connected:
                 ConnectStatus = OnboardingText.PlayNow;
+                ConnectTone = StatusTone.Warn;
                 break;
             case ConnectionState.Enabling or ConnectionState.Opening or ConnectionState.WaitingForPhone:
                 ConnectStatus = $"Connecting to {device.Name}…";
+                ConnectTone = StatusTone.Warn;
                 break;
             case ConnectionState.Disconnected when _coordinator.IsReconnecting:
                 ConnectStatus = "Reconnecting…";
+                ConnectTone = StatusTone.Warn;
                 break;
             default:
                 ConnectStatus = "Not connected.";
+                ConnectTone = StatusTone.Bad;
                 break;
         }
     }
@@ -472,6 +481,7 @@ public sealed partial class OnboardingViewModel : ObservableObject, IDisposable
         IsMutedHintVisible = false;
         ConnectError = null;
         ConnectStatus = OnboardingText.Success;
+        ConnectTone = StatusTone.Good;
         _logger.LogInformation("Onboarding succeeded: phone audio is arriving from {Device}", LogRedaction.DeviceId(device.Id));
 
         var nickname = AppSettings.CleanNickname(Nickname);

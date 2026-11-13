@@ -20,6 +20,10 @@
     <Color x:Key="AccentHoverColor">#9DB5FF</Color>
     <Color x:Key="OnAccentColor">#0B0D10</Color>
     <Color x:Key="WarningColor">#F5C062</Color>
+    <!-- Connection status: green = receiving, yellow = connected / connecting, red = not connected. -->
+    <Color x:Key="GoodColor">#4ADE80</Color>
+    <Color x:Key="WarnColor">#F5C062</Color>
+    <Color x:Key="BadColor">#F87171</Color>
 
     <!-- Brushes (frozen: no animation, cheap to share) -->
     <SolidColorBrush x:Key="BackgroundBrush" po:Freeze="True" Color="{StaticResource BackgroundColor}" />
@@ -32,6 +36,9 @@
     <SolidColorBrush x:Key="AccentHoverBrush" po:Freeze="True" Color="{StaticResource AccentHoverColor}" />
     <SolidColorBrush x:Key="OnAccentBrush" po:Freeze="True" Color="{StaticResource OnAccentColor}" />
     <SolidColorBrush x:Key="WarningBrush" po:Freeze="True" Color="{StaticResource WarningColor}" />
+    <SolidColorBrush x:Key="GoodBrush" po:Freeze="True" Color="{StaticResource GoodColor}" />
+    <SolidColorBrush x:Key="WarnBrush" po:Freeze="True" Color="{StaticResource WarnColor}" />
+    <SolidColorBrush x:Key="BadBrush" po:Freeze="True" Color="{StaticResource BadColor}" />
     <SolidColorBrush x:Key="TransparentBrush" po:Freeze="True" Color="Transparent" />
 
     <!-- Radii -->

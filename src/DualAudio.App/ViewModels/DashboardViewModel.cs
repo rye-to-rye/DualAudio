@@ -92,7 +92,11 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
     private ConnectionState connectionState;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusTone))]
     private StatusKind statusKind;
+
+    /// <summary>Green / yellow / red for the status pill, the phone card's state line and the tray flyout dot.</summary>
+    public StatusTone StatusTone => StatusTones.For(StatusKind);
 
     [ObservableProperty]
     private string statusText = "Disconnected";

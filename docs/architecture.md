@@ -150,10 +150,18 @@ It is retryable exactly like `Unknown`, including the BUG-001 priming reopen ret
 - **Start with Windows:** `AutoStartRegistration.Sync(enabled, Environment.ProcessPath)` writes
   `"<exe>" --minimized`, or removes the value when off. It runs on every start, so a moved exe is rewritten. With
   `--minimized` no window is shown unless onboarding is needed (no saved phone).
-- **Settings window:** auto-connect, start with Windows, hotkey recorder (the window's own `PreviewKeyDown` while a
-  row is recording; Esc cancels), nickname of the saved phone, open log folder, Reset (confirm → `AppSettings.Default`,
-  volume 100/unmuted, hotkeys re-applied, start-up entry removed), About (version + NuGet licenses from
-  `ThirdPartyNotices`). `SettingsChanged` → `DashboardViewModel.ReloadSettingsAsync`.
+- **Settings page** (inside the main window, not a separate window): `ShellViewModel.CurrentPage` switches
+  Dashboard ⇄ Settings; the gear and tray "Settings" navigate there and show the main window, the header back arrow
+  (top left) returns. Each visit creates a fresh `SettingsViewModel` (factory) and detaches it on leaving; closing
+  the window or "Open DualAudio" returns to the dashboard. Contents: auto-connect, start with Windows, hotkey recorder
+  (the page's own `PreviewKeyDown` while a row is recording; Esc cancels; the row keeps "Press keys…" until the change
+  finishes, then shows the final combination once), nickname of the saved phone, open log folder, Reset (confirm →
+  `AppSettings.Default`, volume 100/unmuted, hotkeys re-applied, start-up entry removed), About (version + NuGet
+  licenses from `ThirdPartyNotices`). `ShellViewModel.SettingsChanged` → `DashboardViewModel.ReloadSettingsAsync`.
+- **Status colours** (`StatusTone`, `StatusToneToBrushConverter`): green = connected and receiving (muted too), yellow =
+  connected but silent / connecting / reconnecting / priming, red = not connected (incl. phone not found, Bluetooth
+  off, errors). Used by the status pill, the phone card state line, the onboarding status row and the flyout dot;
+  the text always stays.
 
 ## Phone audio session rule (`PhoneSessionMatcher`)
 

@@ -180,7 +180,7 @@ public sealed class WindowXamlTests
     // ------------------------------------------------------------------ settings
 
     [Fact]
-    public async Task Settings_window_xaml_loads_and_shows_a_conflict()
+    public async Task Settings_is_a_page_in_the_main_window_with_a_back_button_and_shows_a_conflict()
     {
         await using var f = await DashboardFixture.CreateAsync();
         var registrar = new Core.Tests.Fakes.FakeHotkeyService();
@@ -197,11 +197,134 @@ public sealed class WindowXamlTests
             Substitute.For<global::DualAudio.App.Services.IConfirmDialog>(),
             f.Dispatcher,
             new global::DualAudio.Infrastructure.AppPaths(Path.GetTempPath()));
-        await vm.InitializeAsync();
+        var shell = new AppVm.ShellViewModel(f.Store, Substitute.For<AppVm.IAppShell>(), settingsPageFactory: () => vm);
+        shell.OpenSettingsCommand.Execute(null);
+        await shell.SettingsLoad;
 
-        var texts = RunSta(() => VisibleTexts(new SettingsWindow(vm)));
+        var (texts, backVisible, gearVisible) = RunSta(() =>
+        {
+            var window = new MainWindow(f.Vm, shell);
+            LoadWindow(window);
+            var result = (Texts((FrameworkElement)window.Content),
+                ((Button)window.FindName("BackButton")).Visibility == Visibility.Visible,
+                ((Button)window.FindName("SettingsButton")).Visibility == Visibility.Visible);
+            window.Close();
+            return result;
+        });
 
-        texts.Should().Contain(["General", "Shortcuts", "About", "Ctrl+Alt+M", "Ctrl+Alt+PgDn", "Shortcut in use by another app", "Reset settings…"]);
+        backVisible.Should().BeTrue("the back button sits at the top left on the settings page");
+        gearVisible.Should().BeFalse();
+        texts.Should().Contain(["Settings", "General", "Start DualAudio when my PC turns on (runs in the tray)", "Shortcuts", "About",
+            "Ctrl+Alt+M", "Ctrl+Alt+PgDn", "Shortcut in use by another app", "Reset settings…"]);
+        texts.Should().NotContain(["Phone volume", "Game audio is never changed"], "the dashboard is hidden behind the settings page");
+    }
+
+    [Fact]
+    public async Task Dashboard_has_a_settings_cog_glyph_and_no_back_button()
+    {
+        await using var f = await DashboardFixture.CreateAsync();
+
+        var (glyph, font, backVisible) = RunSta(() =>
+        {
+            var window = new MainWindow(f.Vm, Shell());
+            LoadWindow(window);
+            var button = (Button)window.FindName("SettingsButton");
+            var text = (TextBlock)button.Content;
+            var result = (text.Text, text.FontFamily.Source, ((Button)window.FindName("BackButton")).Visibility == Visibility.Visible);
+            window.Close();
+            return result;
+        });
+
+        glyph.Should().Be("", "Segoe Fluent Icons / MDL2 'Settings' cog");
+        font.Should().Be("Segoe Fluent Icons, Segoe MDL2 Assets");
+        backVisible.Should().BeFalse();
+    }
+
+    // ------------------------------------------------------------------ status colours
+
+    private static readonly Color Good = Color.FromRgb(0x4A, 0xDE, 0x80);
+    private static readonly Color Warn = Color.FromRgb(0xF5, 0xC0, 0x62);
+    private static readonly Color Bad = Color.FromRgb(0xF8, 0x71, 0x71);
+
+    [Fact]
+    public async Task Status_colours_receiving_is_green_everywhere()
+    {
+        await using var f = await DashboardFixture.CreateAsync();
+        await f.H.ConnectFullyAsync();
+        f.H.SetPhoneSession(active: true, peak: 0.3f);
+        await f.AdvanceAsync(TimeSpan.FromMilliseconds(250));
+        await f.PhoneAudio.SetMutedAsync(true); // muted while receiving stays green
+        await f.SettleAsync();
+
+        StatusColours(f).Should().Be((Good, Good, Good, Good));
+    }
+
+    [Fact]
+    public async Task Status_colours_connected_without_audio_is_yellow()
+    {
+        await using var f = await DashboardFixture.CreateAsync();
+        await f.H.ConnectFullyAsync();
+        await f.SettleAsync();
+
+        StatusColours(f).Should().Be((Warn, Warn, Warn, Warn));
+    }
+
+    [Fact]
+    public async Task Status_colours_not_connected_is_red()
+    {
+        await using var f = await DashboardFixture.CreateAsync();
+        await f.H.ConnectFullyAsync();
+        f.H.RaiseRadio(RadioStatus.Off);
+        await f.SettleAsync();
+
+        StatusColours(f).Should().Be((Bad, Bad, Bad, Bad));
+    }
+
+    /// <summary>(pill dot, pill text, phone card state line, tray flyout dot).</summary>
+    private static (Color, Color, Color, Color) StatusColours(DashboardFixture f) => RunSta(() =>
+    {
+        static Color Of(Brush brush) => ((SolidColorBrush)brush).Color;
+
+        var window = new MainWindow(f.Vm, Shell());
+        LoadWindow(window);
+        var pillDot = Of(((System.Windows.Shapes.Ellipse)window.FindName("StatusPillDot")).Fill);
+        var pillText = Of(((TextBlock)window.FindName("StatusPillText")).Foreground);
+        var stateLine = Of(((TextBlock)window.FindName("PhoneStateLine")).Foreground);
+        window.Close();
+
+        using var tray = new TrayIcon(new AppVm.TrayViewModel(f.Vm, Shell()));
+        var flyout = (FrameworkElement)tray.TrayPopup!;
+        flyout.DataContext = tray.DataContext;
+        Lay(flyout, new Size(360, 460));
+        var trayDot = Of(((System.Windows.Shapes.Ellipse)tray.FindName("FlyoutStatusDot")).Fill);
+        return (pillDot, pillText, stateLine, trayDot);
+    });
+
+    // ------------------------------------------------------------------ text box
+
+    [Fact]
+    public void Text_box_placeholder_caret_and_text_share_the_12px_left_padding()
+    {
+        var (placeholderX, emptyCaretX, textX) = RunSta(() =>
+        {
+            var box = new TextBox { Tag = "Nickname (optional)", Width = 300 };
+            var window = new Window { Content = new Grid { Children = { box } } };
+            window.Resources.MergedDictionaries.Add(LoadDictionary("Themes/Controls.xaml"));
+            LoadWindow(window);
+
+            var placeholder = (TextBlock)box.Template.FindName("Placeholder", box);
+            var placeholderLeft = placeholder.TransformToAncestor(box).Transform(new Point(0, 0)).X + placeholder.Padding.Left;
+            var caret = box.GetRectFromCharacterIndex(0).X;
+            box.Text = "Work phone";
+            Lay((FrameworkElement)window.Content, WindowSize);
+            var text = box.GetRectFromCharacterIndex(0).X;
+            window.Close();
+            return (placeholderLeft, caret, text);
+        });
+
+        placeholderX.Should().BeApproximately(12, 0.6);
+        emptyCaretX.Should().BeApproximately(12, 0.6);
+        textX.Should().BeApproximately(12, 0.6);
     }
 
     // ------------------------------------------------------------------ tray

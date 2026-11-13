@@ -5,6 +5,7 @@
                  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  xmlns:vm="clr-namespace:DualAudio.App.ViewModels"
+                 xmlns:local="clr-namespace:DualAudio.App.Views"
                  xmlns:conn="clr-namespace:DualAudio.Core.Connection;assembly=DualAudio.Core"
                  xmlns:errors="clr-namespace:DualAudio.Core.Errors;assembly=DualAudio.Core"
                  mc:Ignorable="d"
@@ -32,38 +33,45 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Header (in the caption bar): monogram, name, status pill, Settings -->
+        <!--
+            Header (in the caption bar): [back, settings page only] monogram, name / "Settings", status pill, [Settings, dashboard only].
+            Shell = ShellViewModel (window property): which page is shown.
+        -->
         <Border Grid.Row="0" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" />
         <ui:TitleBar Grid.Row="0" Height="{StaticResource HeaderHeight}" ShowMaximize="False"
                      ButtonsForeground="{StaticResource TextMutedBrush}">
             <ui:TitleBar.Header>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="24,0,0,0">
+                    <Button x:Name="BackButton" Margin="0,0,12,0" Style="{StaticResource IconButton}" Width="36" Height="36"
+                            Command="{Binding Shell.GoBackCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Visibility="{Binding Shell.IsSettingsPage, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibility}}"
+                            ToolTip="Back to the dashboard" AutomationProperties.Name="Back to dashboard">
+                        <Viewbox Width="16" Height="16">
+                            <Path Style="{StaticResource Icon}" Data="{StaticResource BackIcon}" Stroke="{StaticResource TextBrush}" StrokeThickness="1.8" />
+                        </Viewbox>
+                    </Button>
                     <Image Source="{StaticResource MonogramImage}" Width="26" Height="26" />
-                    <TextBlock Margin="12,0,0,0" Text="DualAudio" Style="{StaticResource HeaderTitle}" />
+                    <TextBlock Margin="12,0,0,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource HeaderTitle}">
+                                <Setter Property="Text" Value="DualAudio" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Shell.IsSettingsPage, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                        <Setter Property="Text" Value="Settings" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
                 </StackPanel>
             </ui:TitleBar.Header>
             <ui:TitleBar.TrailingContent>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
                     <Border Style="{StaticResource StatusPill}" AutomationProperties.Name="Connection status">
                         <StackPanel Orientation="Horizontal">
-                            <Ellipse>
-                                <Ellipse.Style>
-                                    <Style TargetType="Ellipse" BasedOn="{StaticResource StatusDot}">
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:StatusKind.Receiving}">
-                                                <Setter Property="Fill" Value="{StaticResource AccentBrush}" />
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:StatusKind.Connected}">
-                                                <Setter Property="Fill" Value="{StaticResource AccentBrush}" />
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:StatusKind.Error}">
-                                                <Setter Property="Fill" Value="{StaticResource WarningBrush}" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Ellipse.Style>
-                            </Ellipse>
-                            <TextBlock Margin="8,0,0,0" FontSize="{StaticResource SmallFontSize}" FontWeight="SemiBold" VerticalAlignment="Center">
+                            <Ellipse x:Name="StatusPillDot" Style="{StaticResource StatusDot}" Fill="{Binding StatusTone, Converter={StaticResource StatusToneBrush}}" />
+                            <TextBlock x:Name="StatusPillText" Margin="8,0,0,0" FontSize="{StaticResource SmallFontSize}" FontWeight="SemiBold" VerticalAlignment="Center"
+                                       Foreground="{Binding StatusTone, Converter={StaticResource StatusToneBrush}}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="Text" Value="{Binding StatusText}" />
@@ -82,18 +90,24 @@
                             </TextBlock>
                         </StackPanel>
                     </Border>
-                    <!-- Command set in code-behind (ShellViewModel.OpenSettingsCommand). -->
                     <Button x:Name="SettingsButton" Margin="12,0,0,0" Style="{StaticResource IconButton}"
+                            Command="{Binding Shell.OpenSettingsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Visibility="{Binding Shell.IsDashboardPage, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibility}}"
                             ToolTip="Settings" AutomationProperties.Name="Settings">
-                        <Viewbox Width="18" Height="18">
-                            <Path Style="{StaticResource Icon}" Data="{StaticResource GearIcon}" />
-                        </Viewbox>
+                        <TextBlock Style="{StaticResource SettingsGlyph}" FontSize="18" />
                     </Button>
                 </StackPanel>
             </ui:TitleBar.TrailingContent>
         </ui:TitleBar>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <!-- Settings page (its own view model; created when the page opens, released when it closes) -->
+        <local:SettingsPage x:Name="SettingsHost" Grid.Row="1"
+                            DataContext="{Binding Shell.SettingsPage, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Visibility="{Binding Shell.IsSettingsPage, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibility}}" />
+
+        <!-- Dashboard page -->
+        <ScrollViewer x:Name="DashboardPage" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      Visibility="{Binding Shell.IsDashboardPage, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibility}}">
             <Grid Margin="{StaticResource WindowPadding}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="1.45*" />
@@ -181,7 +195,8 @@
                             <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding SelectedDevice.Name, FallbackValue='No phone yet', TargetNullValue='No phone yet'}"
                                            FontSize="{StaticResource PhoneNameFontSize}" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
-                                <TextBlock Margin="0,4,0,0" FontSize="{StaticResource BodyFontSize}" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap">
+                                <TextBlock x:Name="PhoneStateLine" Margin="0,4,0,0" FontSize="{StaticResource BodyFontSize}" TextWrapping="Wrap"
+                                           Foreground="{Binding StatusTone, Converter={StaticResource StatusToneBrush}}">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="Text" Value="Not connected" />

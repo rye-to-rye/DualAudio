@@ -45,7 +45,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     public const string InUseMessage = "Shortcut in use by another app";
     public const string DuplicateMessage = "Already used by another DualAudio shortcut";
     public const string InvalidMessage = "Use Ctrl, Alt or Win together with another key";
-    public const string RecordingText = "Press the new shortcut… (Esc to cancel)";
+    /// <summary>Shown on the key button while recording. Short, so the button keeps its width (no layout jump).</summary>
+    public const string RecordingText = "Press keys…";
     public const string StartupFailedMessage = "Couldn't update the Windows start-up entry. See the log for details.";
 
     private readonly ISettingsStore _settings;
@@ -209,11 +210,23 @@ public sealed partial class SettingsViewModel : ObservableObject
             return null;
         }
 
-        var binding = new HotkeyBinding(row.Action, modifiers, virtualKey);
-        row.IsRecording = false;
+        // Stop taking keys now, but keep the row in its recording look ("Press keys…") until the outcome is known, then
+        // switch to the final combination in one step. Clearing IsRecording before the change (as before) showed the
+        // prompt in the idle style and let the Changed refresh rewrite the row mid-change: the visible "glitch".
         Recording = null;
-        var result = await _hotkeys.ChangeAsync(binding);
-        RefreshHotkeys();
+        var binding = new HotkeyBinding(row.Action, modifiers, virtualKey);
+        HotkeyChangeResult? result = null;
+        try
+        {
+            result = await _hotkeys.ChangeAsync(binding);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Changing the {Action} shortcut failed", row.Action);
+        }
+
+        var current = _hotkeys.Current;
+        ApplyRow(row, current);
         row.Message = result switch
         {
             HotkeyChangeResult.InUseByAnotherApp => InUseMessage,
@@ -221,6 +234,8 @@ public sealed partial class SettingsViewModel : ObservableObject
             HotkeyChangeResult.Invalid => InvalidMessage,
             _ => row.Message,
         };
+        row.IsRecording = false;
+        RefreshHotkeys(except: row);
         return result;
     }
 
@@ -311,29 +326,33 @@ public sealed partial class SettingsViewModel : ObservableObject
         RefreshHotkeys();
     }
 
-    private void RefreshHotkeys()
+    /// <summary>Rows that are recording keep their prompt (a change in progress finishes them itself).</summary>
+    private void RefreshHotkeys(HotkeyRow? except = null)
     {
         var current = _hotkeys.Current;
         foreach (var row in Hotkeys)
         {
-            if (row.IsRecording)
+            if (!row.IsRecording && row != except)
             {
-                continue;
-            }
-
-            if (current.TryGetValue(row.Action, out var state))
-            {
-                row.Keys = HotkeyFormat.Format(state.Binding);
-                row.Message = state.IsRegistered ? null : InUseMessage;
-            }
-            else
-            {
-                row.Keys = "Not set";
+                ApplyRow(row, current);
             }
         }
     }
 
-    private void OnHotkeysChanged(object? sender, EventArgs e) => _dispatcher.Post(RefreshHotkeys);
+    private static void ApplyRow(HotkeyRow row, IReadOnlyDictionary<HotkeyAction, HotkeyState> current)
+    {
+        if (current.TryGetValue(row.Action, out var state))
+        {
+            row.Keys = HotkeyFormat.Format(state.Binding);
+            row.Message = state.IsRegistered ? null : InUseMessage;
+        }
+        else
+        {
+            row.Keys = "Not set";
+        }
+    }
+
+    private void OnHotkeysChanged(object? sender, EventArgs e) => _dispatcher.Post(() => RefreshHotkeys());
 
     private async Task UpdateAsync(Func<AppSettings, AppSettings> change, string what)
     {

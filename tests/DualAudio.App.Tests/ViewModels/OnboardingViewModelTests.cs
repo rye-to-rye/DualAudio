@@ -184,6 +184,7 @@ public sealed class OnboardingViewModelTests
         f.H.Sut.CurrentState.Should().Be(ConnectionState.Connected);
         f.Vm.IsSucceeded.Should().BeFalse();
         f.Vm.ConnectStatus.Should().Be(OnboardingText.PlayNow);
+        f.Vm.ConnectTone.Should().Be(StatusTone.Warn, "connected but nothing playing is yellow");
         f.Vm.FinishCommand.CanExecute(null).Should().BeFalse();
         f.Store.Current.PreferredDeviceId.Should().BeNull("nothing is saved before audio arrives");
         f.Store.Current.OnboardingCompleted.Should().BeFalse();
@@ -193,6 +194,7 @@ public sealed class OnboardingViewModelTests
 
         f.Vm.IsSucceeded.Should().BeTrue();
         f.Vm.ConnectStatus.Should().Be(OnboardingText.Success);
+        f.Vm.ConnectTone.Should().Be(StatusTone.Good, "hearing audio is green");
         f.Vm.FinishCommand.CanExecute(null).Should().BeTrue();
         f.Store.Current.PreferredDeviceId.Should().Be(PhoneId);
         f.Store.Current.OnboardingCompleted.Should().BeTrue();
@@ -256,6 +258,7 @@ public sealed class OnboardingViewModelTests
         await f.AdvanceAsync(new ConnectionCoordinatorOptions().PrimingDelay);
         f.H.OpenCalls.Should().Be(2, "priming open + real open");
         f.Vm.IsSucceeded.Should().BeFalse();
+        f.Vm.ConnectTone.Should().Be(StatusTone.Warn, "priming is yellow");
 
         f.H.RaiseReceiver(ReceiverState.Opened);
         await f.SettleAsync();
@@ -277,6 +280,7 @@ public sealed class OnboardingViewModelTests
         await f.GoToConnectStepAsync();
 
         f.Vm.IsConnectErrorVisible.Should().BeTrue();
+        f.Vm.ConnectTone.Should().Be(StatusTone.Bad, "not connected is red");
         f.Vm.ConnectError!.Title.Should().Be("Can't reach your phone");
 
         f.H.SetOpenResult(OpenResult.Ok());

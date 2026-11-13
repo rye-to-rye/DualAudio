@@ -1,0 +1,157 @@
+<!--
+    Settings page (MinSettings.html), hosted inside the main window: MainWindow's header shows the back arrow at the top
+    left. DataContext = SettingsViewModel (ShellViewModel.SettingsPage).
+-->
+<UserControl x:Class="DualAudio.App.Views.SettingsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:DualAudio.App.ViewModels"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}"
+             d:DesignWidth="960" d:DesignHeight="580">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/DualAudio;component/Themes/Controls.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid Margin="{StaticResource WindowPadding}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition />
+                <ColumnDefinition Width="{StaticResource CardGapLength}" />
+                <ColumnDefinition />
+            </Grid.ColumnDefinitions>
+
+            <!-- ======================== Left column -->
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Style="{StaticResource Card}" Margin="{StaticResource CardGapBelow}">
+                    <StackPanel>
+                        <TextBlock Text="General" Style="{StaticResource CardHeading}" />
+                        <CheckBox Margin="0,14,0,0" Style="{StaticResource SettingRowCheckBox}" Content="Start DualAudio when my PC turns on (runs in the tray)"
+                                  IsChecked="{Binding StartWithWindows}" />
+                        <TextBlock Margin="0,4,0,0" Text="{Binding StartWithWindowsMessage}" Style="{StaticResource WarningText}" />
+                        <CheckBox Margin="0,10,0,0" Style="{StaticResource SettingRowCheckBox}" Content="Connect to my saved phone on start"
+                                  IsChecked="{Binding AutoConnectOnStart}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Style="{StaticResource Card}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="Phone" Style="{StaticResource CardHeading}" />
+                        <StackPanel Grid.Row="1" Margin="0,14,0,0">
+                            <TextBlock Text="{Binding SavedPhoneName}" FontSize="{StaticResource CardHeadingFontSize}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Margin="0,4,0,0" Text="Saved phone · paired in Windows" Style="{StaticResource MutedText}"
+                                       Visibility="{Binding HasSavedPhone, Converter={StaticResource BoolToVisibility}}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="2" Margin="0,14,0,0" IsEnabled="{Binding HasSavedPhone}">
+                            <TextBlock Text="Nickname" />
+                            <DockPanel Margin="0,8,0,0">
+                                <Button DockPanel.Dock="Right" Margin="10,0,0,0" Content="Save" Command="{Binding SaveNicknameCommand}" />
+                                <TextBox Height="40" Background="{StaticResource BackgroundBrush}" Text="{Binding Nickname, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="40" Tag="Nickname (optional)" AutomationProperties.Name="Nickname" />
+                            </DockPanel>
+                            <TextBlock Margin="0,6,0,0" Text="Only used inside DualAudio. Your phone's name in Windows stays the same."
+                                       Style="{StaticResource CaptionText}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- ======================== Right column -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Style="{StaticResource Card}" Margin="{StaticResource CardGapBelow}">
+                    <StackPanel>
+                        <TextBlock Text="Shortcuts" Style="{StaticResource CardHeading}" Margin="0,0,0,2" />
+                        <ItemsControl ItemsSource="{Binding Hotkeys}" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:HotkeyRow}">
+                                    <StackPanel Margin="0,12,0,0">
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" Content="{Binding Keys}"
+                                                    Command="{Binding DataContext.BeginRecordingCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}" AutomationProperties.Name="{Binding Label}">
+                                                <Button.Style>
+                                                    <Style TargetType="Button" BasedOn="{StaticResource KeyButton}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasMessage}" Value="True">
+                                                                <Setter Property="BorderBrush" Value="{StaticResource WarningBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding IsRecording}" Value="True">
+                                                                <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                                                <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Button.Style>
+                                            </Button>
+                                            <TextBlock Text="{Binding Label}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,12,0" />
+                                        </DockPanel>
+                                        <TextBlock Margin="0,6,0,0" Text="{Binding Message}" Style="{StaticResource WarningText}"
+                                                   Visibility="{Binding HasMessage, Converter={StaticResource BoolToVisibility}}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Margin="0,12,0,0" Text="Click a shortcut, then press the new keys (Esc cancels). They work in games too; nothing pops up."
+                                   Style="{StaticResource CaptionText}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Style="{StaticResource Card}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Grid.Row="0">
+                            <TextBlock Text="About" Style="{StaticResource CardHeading}" Margin="0,0,0,12" />
+                            <TextBlock>
+                                <Run Text="DualAudio" /> <Run Text="version" Foreground="{StaticResource TextMutedBrush}" /> <Run Text="{Binding Version, Mode=OneWay}" Foreground="{StaticResource TextMutedBrush}" />
+                            </TextBlock>
+                            <Button Margin="0,12,0,0" Content="Open log folder" Command="{Binding OpenLogFolderCommand}"
+                                    Style="{StaticResource LinkButton}" FontSize="{StaticResource BodyFontSize}" />
+                            <ToggleButton x:Name="LicensesToggle" Margin="0,12,0,0" Content="Open-source licenses" Style="{StaticResource LinkToggle}" />
+                            <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding Licenses}" Focusable="False"
+                                          Visibility="{Binding IsChecked, ElementName=LicensesToggle, Converter={StaticResource BoolToVisibility}}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:PackageLicense}">
+                                        <TextBlock Margin="0,2,0,0" Style="{StaticResource CaptionText}">
+                                            <Run Text="{Binding Package, Mode=OneWay}" Foreground="{StaticResource TextBrush}" /> <Run Text="—" />
+                                            <Hyperlink NavigateUri="{Binding Url}" RequestNavigate="OnLicenseLinkClicked">
+                                                <Run Text="{Binding License, Mode=OneWay}" />
+                                            </Hyperlink>
+                                        </TextBlock>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                        <Button Grid.Row="2" Margin="0,16,0,0" HorizontalAlignment="Left" Content="Reset settings…" Command="{Binding ResetSettingsCommand}" />
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+    </ScrollViewer>
+</UserControl>

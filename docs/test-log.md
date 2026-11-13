@@ -206,3 +206,35 @@ copy the `STATE` lines around it into the Notes column. Never paste full Bluetoo
 | 7 | Fix audio link | Connected, phone paused (yellow "Connected") → link "No sound? Fix audio" visible on the phone card and in the tray flyout. Play → link disappears (green). Pause again, click it | Link only in the yellow Connected state; click → "Connecting…" → Connected within ~4-8 s; log: `user requested audio fix`, `Audio fix: phone session …; reconnecting` | | |
 
 **Status:** NOT YET RUN.
+
+### Round 2 (Parts C + D)
+
+**Leak check with the probe** (`stress`): exit DualAudio first (tray → Exit) so only the probe holds a connection,
+phone Bluetooth on and near the PC (nothing needs to play).
+
+```powershell
+cd C:\dev\DualAudio
+dotnet build DualAudio.sln -c Debug
+dotnet run --project tools\DualAudio.Probe\DualAudio.Probe.csproj
+# at the probe prompt:
+list
+stress 100        # 100 open/close cycles with device [0] + 100 session enumerations (~12-15 min; 3 s gap per cycle)
+stress 100 1      # same with device [1]
+stress 1000 sessions   # enumerations only, no Bluetooth (~20 s)
+```
+
+The result block is printed and appended to `tools\DualAudio.Probe\bin\Debug\net10.0-windows10.0.19041.0\probe-log.txt`:
+`before`, `baseline (after warm-up)`, `after cycles (alive)`, `after dispose`, then `handle growth … -> PASS/FAIL`.
+
+| # | Check | How | Expected | Pass/Fail | Notes |
+|---|-------|-----|----------|-----------|-------|
+| 8 | 2-hour game session | Connected + phone playing on and off, game running 2 h. Then search the log for `RESOURCES` | No crash; every `RESOURCES interval` line `cpu=` < 0.50 % and `private=` < 120 MB; no `OVER BUDGET` line | | worst cpu / private: |
+| 9 | `stress 100` | See above | `connect cycles: 100 opened` (a few failures are OK), handle growth < 5 % → PASS | | |
+| 10 | Copy diagnostics | Settings → About → Copy diagnostics | "Saved to C:\Users\…\Desktop\DualAudio-diagnostics-….zip"; Show in folder opens the Desktop. Zip has `diagnostics.txt` (app version, Windows build, adapter + driver version, output devices, settings, up to 50 `STATE` lines) and `logs\` with at most 3 files | | |
+| 11 | Nothing private in the zip | Open every file in the zip; search for your phone's nickname, any `xx:xx:xx:xx:xx:xx` address, your Windows user name | None found (addresses show as `…ABCD`, nicknames as `<nickname>`, paths as `%USERPROFILE%`). Phone names as Windows reports them and the PC name may appear in logs (needed for the "4" name bug) | | |
+
+Measured on the dev PC while writing this (2026-11-13, Intel(R) Wireless Bluetooth(R) driver 24.70.0.4, Windows
+10.0.26200.9974): `stress 1000 sessions` → handles 430 → 439 (+2.1 %), USER 3 → 5 (one-off), private 20.6 → 24.8 MB
+(flat from ~iteration 80) → PASS. The Bluetooth cycle part (`stress 100`) still needs the phone.
+
+**Status (Round 2):** NOT YET RUN on hardware.

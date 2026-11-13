@@ -22,6 +22,7 @@ public sealed class SettingsViewModelTests : IAsyncLifetime
     private readonly ISystemSettingsLauncher _launcher = Substitute.For<ISystemSettingsLauncher>();
     private readonly IConfirmDialog _confirm = Substitute.For<IConfirmDialog>();
     private readonly AppPaths _paths = new(@"C:\Users\test\AppData\Local\DualAudio");
+    private readonly IDiagnosticsExporter _exporter = Substitute.For<IDiagnosticsExporter>();
     private InMemorySettingsStore _store = null!;
     private PhoneAudioService _phoneAudio = null!;
     private HotkeyManager _hotkeys = null!;
@@ -244,6 +245,35 @@ public sealed class SettingsViewModelTests : IAsyncLifetime
         changed.Should().Be(1);
     }
 
+    [Fact]
+    public async Task Copy_diagnostics_shows_the_zip_path_and_opens_its_folder()
+    {
+        const string zip = @"C:\Users\test\Desktop\DualAudio-diagnostics-20261113-120000.zip";
+        _exporter.ExportAsync(default).ReturnsForAnyArgs(Task.FromResult(zip));
+        _sut.HasDiagnosticsZip.Should().BeFalse();
+
+        await _sut.CopyDiagnosticsCommand.ExecuteAsync(null);
+
+        _sut.DiagnosticsMessage.Should().Be("Saved to " + zip + Environment.NewLine
+                                            + "Includes your phone's and PC's Bluetooth names. Nothing else personal.");
+        _sut.HasDiagnosticsZip.Should().BeTrue();
+        _sut.CopyDiagnosticsCommand.CanExecute(null).Should().BeTrue("can be run again");
+        await _sut.ShowDiagnosticsZipCommand.ExecuteAsync(null);
+        await _launcher.Received(1).OpenFolderAsync(@"C:\Users\test\Desktop");
+    }
+
+    [Fact]
+    public async Task Copy_diagnostics_failure_says_so_without_throwing()
+    {
+        _exporter.ExportAsync(default).ReturnsForAnyArgs(Task.FromException<string>(new IOException("disk full")));
+
+        await _sut.CopyDiagnosticsCommand.ExecuteAsync(null);
+
+        _sut.DiagnosticsMessage.Should().Contain("Couldn't create");
+        _sut.HasDiagnosticsZip.Should().BeFalse();
+        _sut.IsCopyingDiagnostics.Should().BeFalse();
+    }
+
     private async Task CreateAsync(AppSettings settings)
     {
         _store = new InMemorySettingsStore(settings);
@@ -253,7 +283,7 @@ public sealed class SettingsViewModelTests : IAsyncLifetime
         _hotkeys = new HotkeyManager(_registrar, _phoneAudio, _store);
         await _hotkeys.ApplyFromSettingsAsync();
         _sut = new SettingsViewModel(
-            _store, _hotkeys, new AutoStartRegistration(_runKey), _h.Sut, _phoneAudio, _launcher, _confirm, new TestDispatcher(), _paths)
+            _store, _hotkeys, new AutoStartRegistration(_runKey), _h.Sut, _phoneAudio, _launcher, _confirm, new TestDispatcher(), _paths, diagnosticsExporter: _exporter)
         {
             ExePath = () => Exe,
         };

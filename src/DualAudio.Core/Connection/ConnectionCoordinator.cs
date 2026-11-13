@@ -955,9 +955,10 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     }
 
     /// <summary>
-    /// Outside the transition lock: waits <see cref="ConnectionCoordinatorOptions.FixAudioMinWait"/>, then polls until the
-    /// phone session on the default endpoint is no longer Active or <see cref="ConnectionCoordinatorOptions.FixAudioMaxWait"/>
-    /// has passed, then reopens (serialized, unless the user acted meanwhile).
+    /// Outside the transition lock: waits <see cref="ConnectionCoordinatorOptions.FixAudioMinWait"/>, then until the phone
+    /// session on the default endpoint is no longer Active or <see cref="ConnectionCoordinatorOptions.FixAudioMaxWait"/> has
+    /// passed, then reopens (serialized, unless the user acted meanwhile). Event-driven: it re-reads the session only when
+    /// <see cref="IAudioSessionController.PhoneSessionsChanged"/> fires (no polling while not Connected).
     /// </summary>
     private void WaitForSessionInactiveThenReopen(int attempt)
     {
@@ -974,14 +975,37 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
                 await _clock.Delay(_options.FixAudioMinWait, token).ConfigureAwait(false);
                 while (version == Volatile.Read(ref _intentVersion))
                 {
-                    inactive = _sessions is null || !(await ReadStatusSafeAsync(token).ConfigureAwait(false)).IsActiveOnDefault;
-                    if (inactive || waited >= _options.FixAudioMaxWait)
+                    if (_sessions is null)
                     {
+                        inactive = true;
                         break;
                     }
 
-                    await _clock.Delay(_options.StaleSessionPollInterval, token).ConfigureAwait(false);
-                    waited += _options.StaleSessionPollInterval;
+                    // Subscribe before reading, so a change between the read and the wait isn't missed.
+                    var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    void OnChanged(object? sender, EventArgs e) => changed.TrySetResult();
+                    _sessions.PhoneSessionsChanged += OnChanged;
+                    try
+                    {
+                        inactive = !(await ReadStatusSafeAsync(token).ConfigureAwait(false)).IsActiveOnDefault;
+                        var remaining = _options.FixAudioMaxWait - waited;
+                        if (inactive || remaining <= TimeSpan.Zero)
+                        {
+                            break;
+                        }
+
+                        var started = _clock.UtcNow;
+                        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                        var delay = _clock.Delay(remaining, timeout.Token);
+                        await Task.WhenAny(changed.Task, delay).ConfigureAwait(false);
+                        await timeout.CancelAsync().ConfigureAwait(false);
+                        token.ThrowIfCancellationRequested();
+                        waited += delay.IsCompletedSuccessfully ? remaining : _clock.UtcNow - started;
+                    }
+                    finally
+                    {
+                        _sessions.PhoneSessionsChanged -= OnChanged;
+                    }
                 }
             }
             catch (OperationCanceledException)

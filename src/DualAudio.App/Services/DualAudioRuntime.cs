@@ -20,7 +20,8 @@ public sealed class DualAudioRuntime(
     ISettingsStore settings,
     ILogger<DualAudioRuntime> logger,
     ISystemPowerEvents? power = null,
-    ConnectionDiagnostics? diagnostics = null)
+    ConnectionDiagnostics? diagnostics = null,
+    ResourceMonitor? resources = null)
 {
     private readonly CancellationTokenSource _lifetime = new();
 
@@ -31,6 +32,7 @@ public sealed class DualAudioRuntime(
         try
         {
             diagnostics?.Capture("startup");
+            resources?.Start(); // one RESOURCES line now, then every 10 min
             await phoneAudio.InitializeAsync(token).ConfigureAwait(false);
             await radio.StartAsync(token).ConfigureAwait(false);
             logger.LogInformation("Bluetooth radio: {Status}", radio.Status);
@@ -74,6 +76,11 @@ public sealed class DualAudioRuntime(
             if (diagnostics is not null)
             {
                 await diagnostics.DisposeAsync().ConfigureAwait(false);
+            }
+
+            if (resources is not null)
+            {
+                await resources.DisposeAsync().ConfigureAwait(false);
             }
         }
         catch (Exception ex)

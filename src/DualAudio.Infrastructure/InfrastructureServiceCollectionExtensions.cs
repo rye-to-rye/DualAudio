@@ -1,4 +1,5 @@
 using DualAudio.Core.Abstractions;
+using DualAudio.Infrastructure.Diagnostics;
 using DualAudio.Infrastructure.Settings;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -27,6 +28,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.TryAddSingleton(paths);
         services.TryAddSingleton(sp => new JsonSettingsStore(paths.SettingsFile, sp.GetService<ILogger<JsonSettingsStore>>()));
         services.TryAddSingleton<ISettingsStore>(sp => sp.GetRequiredService<JsonSettingsStore>());
+        services.TryAddSingleton<DiagnosticsBundleWriter>(); // "Copy diagnostics": reads only paths.LogDirectory
 
         services.AddSerilog(
             (_, config) => config

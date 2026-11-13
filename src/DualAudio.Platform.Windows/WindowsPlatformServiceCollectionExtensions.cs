@@ -1,7 +1,9 @@
 using DualAudio.Core.Abstractions;
+using DualAudio.Core.Diagnostics;
 using DualAudio.Core.Startup;
 using DualAudio.Platform.Windows.Audio;
 using DualAudio.Platform.Windows.Bluetooth;
+using DualAudio.Platform.Windows.Diagnostics;
 using DualAudio.Platform.Windows.Power;
 using DualAudio.Platform.Windows.Startup;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,6 +32,8 @@ public static class WindowsPlatformServiceCollectionExtensions
         services.TryAddSingleton<IBluetoothRadioControl, BluetoothRadioControl>(); // user-initiated "Turn on Bluetooth" only
         services.TryAddSingleton<IAutoStartEntry, RunKeyAutoStartEntry>(); // HKCU Run value; touched only via AutoStartRegistration
         services.TryAddSingleton<ISystemPowerEvents, SystemPowerEvents>(); // sleep/resume, lock/unlock, logoff (Start() subscribes)
+        services.TryAddSingleton<IProcessResources, ProcessResourceReader>();
+        services.TryAddSingleton<ISystemInfoProvider, SystemInfoProvider>(); // bug report only; read-only
 
         // Core Audio is first touched by the first call on these (no COM in constructors except the worker thread).
         services.TryAddSingleton<IAudioSessionController, NAudioSessionController>();

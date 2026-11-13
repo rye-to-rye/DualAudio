@@ -363,6 +363,10 @@ internal sealed class Probe : IAsyncDisposable
           setvol <i> <0-100> set the volume of session [i] from the last listing ONLY
           mute <i> on|off    mute/unmute session [i] from the last listing ONLY
 
+          stress <n> [i]    leak check: n connect/disconnect cycles with device [i] (default 0) through the
+                    app's own adapters + n session enumerations; prints handles, GDI/USER, private bytes
+          stress <n> sessions   session enumerations only (no Bluetooth)
+
           quit              dispose everything and exit (Ctrl+C also works)
 
         End-to-end coordinator harness (real adapters): restart as  DualAudio.Probe coord [phone-name]
@@ -428,6 +432,7 @@ internal sealed class Probe : IAsyncDisposable
                         else
                             await _audio.SetMuteAsync(muteIndex, mute);
                         break;
+                    case "stress": await StressAsync(parts); break;
                     case "quit" or "exit" or "q": return;
                     case "help" or "?": PrintHelp(); break;
                     case "coord": _log.Warn("Run the harness as its own process: DualAudio.Probe coord [phone-name] (this probe would hold a second connection)."); break;
@@ -437,6 +442,57 @@ internal sealed class Probe : IAsyncDisposable
             catch (OperationCanceledException) when (_quit.IsCancellationRequested) { break; }
             catch (Exception ex) { _log.Exception($"Command '{parts[0]}'", ex); }
         }
+    }
+
+    private async Task StressAsync(string[] parts)
+    {
+        const string usage = "Usage: stress <n> [deviceIndex | sessions]   (e.g. stress 100)";
+        if (parts.Length < 2 || !int.TryParse(parts[1], out var cycles) || cycles < 1)
+        {
+            _log.Warn(usage);
+            return;
+        }
+
+        string? id = null;
+        string? label = null;
+        if (!(parts.Length >= 3 && parts[2].Equals("sessions", StringComparison.OrdinalIgnoreCase)))
+        {
+            var index = 0;
+            if (parts.Length >= 3 && !int.TryParse(parts[2], out index))
+            {
+                _log.Warn(usage);
+                return;
+            }
+
+            DeviceInformation? info;
+            lock (_devicesLock) info = index >= 0 && index < _devices.Count ? _devices[index] : null;
+            if (info is null && parts.Length >= 3)
+            {
+                _log.Warn($"No device at index {index}. Run 'list'.");
+                return;
+            }
+
+            if (info is null)
+                _log.Warn("No phone listed: running session enumerations only.");
+            else
+                (id, label) = (info.Id, $"[{index}] {Redact.ShortId(info.Id)}");
+        }
+
+        await _connLock.WaitAsync(_quit.Token);
+        try
+        {
+            if (_connection is not null)
+            {
+                _log.Warn("Type 'disconnect' first: stress opens its own connection.");
+                return;
+            }
+        }
+        finally
+        {
+            _connLock.Release();
+        }
+
+        await new StressCommand(_log).RunAsync(cycles, id, label, _quit.Token);
     }
 
     private static bool? ParseOnOff(string s) => s.ToLowerInvariant() switch

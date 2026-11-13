@@ -143,6 +143,37 @@ It is retryable exactly like `Unknown`, including the BUG-001 priming reopen ret
   sinceClosed device(…last 4 hex)`. Event-driven only (no polling). The last 50 lines are kept in memory for the bug
   report (Part D).
 
+### Resources and bug reports (Prompt 9, Round 2)
+
+- **Performance budget:** idle CPU < 0.5 %, private memory < 120 MB after 2 h. The only sub-10 s timers are the 250 ms
+  phone-level poll (`PhoneAudioService`, only while Connected) and the BUG-001 safety net (250 ms, only for 8 s after a
+  Connected that met the stale signature). Everything else is ≥ 10 s: link check 10 s, slow retry 60 s, resource log
+  10 min. "Fix audio" waits on `PhoneSessionsChanged` (no polling while not Connected). Idle (not connected) schedules no
+  timer at all (`PerformanceBudgetTests`).
+- **`ResourceMonitor`** (Core, `IProcessResources` from Platform `ProcessResourceReader`: `Process` + `GetGuiResources`):
+  a `RESOURCES` line at start and every 10 min with average CPU over the interval, private MB, handles, GDI/USER, threads;
+  a warning ("OVER BUDGET") above 0.5 % CPU or 120 MB.
+- **COM/WinRT release (checked against NAudio 3.3's IL, not assumed):** NAudio 3.3 uses ComWrappers. `AudioSessionControl.Dispose`
+  unregisters its callbacks and `FinalRelease`s its COM object (its `SimpleAudioVolume`/`AudioMeterInformation` are casts of
+  that object). `AudioSessionManager.RefreshSessions` and `Dispose` both go through `UnregisterNotifications`, which disposes
+  the previous `SessionCollection`. `MMDevice.Dispose` disposes its manager, meter, endpoint volume and property store. So
+  nothing we use is left to the GC as long as every handle is disposed, which `NAudioCoreAudioBackend`/`NAudioSessionController`
+  and `OutputDeviceService` do (`using` for every `MMDevice`/collection, `Dispose` for every session handle not kept, release on
+  rescan). WinRT: `AudioPlaybackConnection` is the only `IClosable` we create; the receiver disposes it on every close,
+  failure and abandoned attempt. `DeviceWatcher`/`Radio`/`DeviceInformation` are not closable; handlers are detached.
+- **Probe `stress <n> [i|sessions]`** runs n open/close cycles through `PlaybackConnectionReceiver` and n full enumerations
+  through `NAudioSessionController` (the shipped code paths), after one warm-up cycle, and prints handles/GDI/USER/threads/
+  private bytes before, after warm-up, after the cycles, after dispose. PASS = handle growth < 5 % and no GDI/USER growth
+  beyond one-off objects.
+- **Copy diagnostics** (Settings > About): `DiagnosticsExporter` (App) gathers app version (`AppInfo`), `SystemInfoProvider`
+  (Windows build + UBR + DisplayVersion; each Bluetooth adapter's name, driver version/provider/date from the device node's
+  DEVPKEY_Device_Driver* properties), output device names, settings (`DiagnosticsSanitizer.DescribeSettings`: nicknames
+  removed, saved phone id → last 4 hex), the last 50 `STATE` lines and the latest `RESOURCES` line.
+  `DiagnosticsBundleWriter` (Infrastructure) writes `Desktop\DualAudio-diagnostics-<UTC>.zip` = `diagnostics.txt` + `logs\`
+  (newest 3 `*.log` from `%LOCALAPPDATA%\DualAudio\logs` only; today's file is read with FileShare.ReadWrite). Every copy
+  is scrubbed: Bluetooth addresses → `…EEFF`, nicknames → `<nickname>`, the user profile path → `%USERPROFILE%`. The page
+  shows the zip's full path and "Show in folder". The log records only the zip's file name.
+
 ## App (`src/DualAudio.App`)
 
 - `Program.Main`: single instance (named Mutex `Local\DualAudio.SingleInstance.v1`; a second launch sets the

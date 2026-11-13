@@ -28,6 +28,7 @@ public static class AppServices
         services.TryAddSingleton<IUiDispatcher>(_ => new WpfUiDispatcher(Application.Current.Dispatcher));
         services.TryAddSingleton<ISystemSettingsLauncher, SystemSettingsLauncher>();
         services.TryAddSingleton<DualAudioRuntime>();
+        services.TryAddSingleton<IDiagnosticsExporter, DiagnosticsExporter>();
         services.TryAddSingleton<DashboardViewModel>();
         services.TryAddSingleton<MainWindow>();
         services.TryAddSingleton<OnboardingViewModel>();
@@ -74,6 +75,12 @@ public static class AppServices
             sp.GetRequiredService<IClock>(),
             sp.GetRequiredService<ConnectionDiagnosticsOptions>(),
             sp.GetRequiredService<ILogger<ConnectionDiagnostics>>()));
+        services.TryAddSingleton(new ResourceMonitorOptions());
+        services.TryAddSingleton(sp => new ResourceMonitor(
+            sp.GetRequiredService<IProcessResources>(),
+            sp.GetRequiredService<IClock>(),
+            sp.GetRequiredService<ResourceMonitorOptions>(),
+            sp.GetRequiredService<ILogger<ResourceMonitor>>()));
         services.TryAddSingleton(sp => new PhoneAudioService(
             sp.GetRequiredService<IAudioSessionController>(),
             sp.GetRequiredService<ConnectionCoordinator>(),

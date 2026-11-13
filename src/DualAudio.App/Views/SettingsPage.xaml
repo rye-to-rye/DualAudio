@@ -133,6 +133,16 @@
                             </TextBlock>
                             <Button Margin="0,12,0,0" Content="Open log folder" Command="{Binding OpenLogFolderCommand}"
                                     Style="{StaticResource LinkButton}" FontSize="{StaticResource BodyFontSize}" />
+                            <!-- Bug report zip on the Desktop (Prompt 9 Part D). -->
+                            <Button x:Name="CopyDiagnosticsButton" Margin="0,12,0,0" Content="Copy diagnostics" Command="{Binding CopyDiagnosticsCommand}"
+                                    Style="{StaticResource LinkButton}" FontSize="{StaticResource BodyFontSize}"
+                                    ToolTip="Creates a zip on your Desktop with recent logs and system details for a bug report. No audio, no Bluetooth addresses, no nicknames." />
+                            <TextBlock Margin="0,4,0,0" Text="{x:Static vm:SettingsViewModel.DiagnosticsPrivacyNote}" Style="{StaticResource CaptionText}" TextWrapping="Wrap" />
+                            <TextBlock Margin="0,6,0,0" Text="{Binding DiagnosticsMessage}" Style="{StaticResource CaptionText}" TextWrapping="Wrap"
+                                       Visibility="{Binding HasDiagnosticsMessage, Converter={StaticResource BoolToVisibility}}" />
+                            <Button Margin="0,4,0,0" Content="Show in folder" Command="{Binding ShowDiagnosticsZipCommand}"
+                                    Style="{StaticResource LinkButton}" FontSize="{StaticResource BodyFontSize}"
+                                    Visibility="{Binding HasDiagnosticsZip, Converter={StaticResource BoolToVisibility}}" />
                             <ToggleButton x:Name="LicensesToggle" Margin="0,12,0,0" Content="Open-source licenses" Style="{StaticResource LinkToggle}" />
                             <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding Licenses}" Focusable="False"
                                           Visibility="{Binding IsChecked, ElementName=LicensesToggle, Converter={StaticResource BoolToVisibility}}">

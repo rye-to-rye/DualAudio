@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Reflection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DualAudio.App.Services;
@@ -47,6 +46,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     public const string InvalidMessage = "Use Ctrl, Alt or Win together with another key";
     /// <summary>Shown on the key button while recording. Short, so the button keeps its width (no layout jump).</summary>
     public const string RecordingText = "Press keys…";
+    /// <summary>Shown under "Copy diagnostics" and in the "zip created" message.</summary>
+    public const string DiagnosticsPrivacyNote = "Includes your phone's and PC's Bluetooth names. Nothing else personal.";
     public const string StartupFailedMessage = "Couldn't update the Windows start-up entry. See the log for details.";
 
     private readonly ISettingsStore _settings;
@@ -59,6 +60,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     private readonly IUiDispatcher _dispatcher;
     private readonly AppPaths _paths;
     private readonly ILogger _logger;
+    private readonly IDiagnosticsExporter? _diagnosticsExporter;
     private bool _loading;
     private string? _savedPhoneId;
 
@@ -72,8 +74,10 @@ public sealed partial class SettingsViewModel : ObservableObject
         IConfirmDialog confirm,
         IUiDispatcher dispatcher,
         AppPaths paths,
-        ILogger<SettingsViewModel>? logger = null)
+        ILogger<SettingsViewModel>? logger = null,
+        IDiagnosticsExporter? diagnosticsExporter = null)
     {
+        _diagnosticsExporter = diagnosticsExporter;
         _settings = settings;
         _hotkeys = hotkeys;
         _autoStart = autoStart;
@@ -122,10 +126,26 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private string nickname = string.Empty;
 
-    public string Version { get; } =
-        typeof(SettingsViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion?.Split('+')[0]
-        ?? typeof(SettingsViewModel).Assembly.GetName().Version?.ToString()
-        ?? "?";
+    public string Version => AppInfo.Version;
+
+    /// <summary>"Copy diagnostics" result: the zip's full path, or why it failed. Null until used.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDiagnosticsMessage))]
+    private string? diagnosticsMessage;
+
+    /// <summary>The last zip created, for "Show in folder".</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ShowDiagnosticsZipCommand))]
+    [NotifyPropertyChangedFor(nameof(HasDiagnosticsZip))]
+    private string? diagnosticsZipPath;
+
+    public bool HasDiagnosticsMessage => DiagnosticsMessage is not null;
+
+    public bool HasDiagnosticsZip => DiagnosticsZipPath is not null;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CopyDiagnosticsCommand))]
+    private bool isCopyingDiagnostics;
 
     public IReadOnlyList<PackageLicense> Licenses => ThirdPartyNotices.Packages;
 
@@ -257,6 +277,57 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [RelayCommand]
     private Task OpenLogFolderAsync() => _launcher.OpenFolderAsync(_paths.LogDirectory);
+
+    private bool CanCopyDiagnostics() => _diagnosticsExporter is not null && !IsCopyingDiagnostics;
+
+    /// <summary>Zip on the Desktop: last 3 logs, versions, adapter + driver, outputs, settings (no nicknames), STATE lines.</summary>
+    [RelayCommand(CanExecute = nameof(CanCopyDiagnostics))]
+    private async Task CopyDiagnosticsAsync()
+    {
+        if (_diagnosticsExporter is not { } exporter)
+        {
+            return;
+        }
+
+        IsCopyingDiagnostics = true;
+        DiagnosticsMessage = "Creating diagnostics…";
+        try
+        {
+            var path = await Task.Run(() => exporter.ExportAsync());
+            DiagnosticsZipPath = path;
+            DiagnosticsMessage = "Saved to " + path + Environment.NewLine + DiagnosticsPrivacyNote;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Creating the diagnostics zip failed");
+            DiagnosticsZipPath = null;
+            DiagnosticsMessage = "Couldn't create the diagnostics file. See the log for details.";
+        }
+        finally
+        {
+            IsCopyingDiagnostics = false;
+        }
+    }
+
+    private bool CanShowDiagnosticsZip() => DiagnosticsZipPath is not null;
+
+    [RelayCommand(CanExecute = nameof(CanShowDiagnosticsZip))]
+    private async Task ShowDiagnosticsZipAsync()
+    {
+        if (DiagnosticsZipPath is not { } path || System.IO.Path.GetDirectoryName(path) is not { } dir)
+        {
+            return;
+        }
+
+        try
+        {
+            await _launcher.OpenFolderAsync(dir);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Opening the diagnostics folder failed");
+        }
+    }
 
     [RelayCommand]
     private async Task ResetSettingsAsync()

@@ -12,7 +12,7 @@ public static class ErrorMessages
             "Turn on Bluetooth in Quick Settings or Settings > Bluetooth & devices, and DualAudio will reconnect."),
         ErrorKind.NoAdapter => new(
             "No Bluetooth adapter found",
-            "Plug in or enable a Bluetooth adapter, then try again."),
+            "Plug in or enable a Bluetooth adapter, and DualAudio will reconnect."),
         ErrorKind.SinkNotSupported => new(
             "This PC can't receive phone audio",
             "Update your Bluetooth driver from the PC or adapter maker's website, or use a different Bluetooth adapter."),

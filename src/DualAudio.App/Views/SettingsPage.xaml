@@ -143,6 +143,10 @@
                             <Button Margin="0,4,0,0" Content="Show in folder" Command="{Binding ShowDiagnosticsZipCommand}"
                                     Style="{StaticResource LinkButton}" FontSize="{StaticResource BodyFontSize}"
                                     Visibility="{Binding HasDiagnosticsZip, Converter={StaticResource BoolToVisibility}}" />
+                            <!-- Updates (Prompt 10): manual check; the dashboard banner offers the restart. -->
+                            <Button x:Name="CheckForUpdatesButton" Margin="0,12,0,0" Content="Check for updates" Command="{Binding CheckForUpdatesCommand}"
+                                    Style="{StaticResource LinkButton}" FontSize="{StaticResource BodyFontSize}" />
+                            <TextBlock Margin="0,4,0,0" Text="{Binding UpdateStatusText}" Style="{StaticResource CaptionText}" TextWrapping="Wrap" />
                             <ToggleButton x:Name="LicensesToggle" Margin="0,12,0,0" Content="Open-source licenses" Style="{StaticResource LinkToggle}" />
                             <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding Licenses}" Focusable="False"
                                           Visibility="{Binding IsChecked, ElementName=LicensesToggle, Converter={StaticResource BoolToVisibility}}">

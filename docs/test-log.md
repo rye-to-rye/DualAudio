@@ -238,3 +238,27 @@ Measured on the dev PC while writing this (2026-11-13, Intel(R) Wireless Bluetoo
 (flat from ~iteration 80) → PASS. The Bluetooth cycle part (`stress 100`) still needs the phone.
 
 **Status (Round 2):** NOT YET RUN on hardware.
+
+## Installer, updates, release (Prompt 10)
+
+Assets come from the GitHub Release (`DualAudioApp-win-Setup.exe`). Folders: app in
+`%LOCALAPPDATA%\DualAudioApp\current\`, settings/logs in `%LOCALAPPDATA%\DualAudio\`. Exit any `dotnet run` copy first.
+
+| # | Check | How | Expected | Pass/Fail | Notes |
+|---|-------|-----|----------|-----------|-------|
+| 1 | Install from Setup.exe | Download `DualAudioApp-win-Setup.exe` from release v0.1.0, run it | SmartScreen "Windows protected your PC" → More info → Run anyway; no admin prompt; DualAudio starts; Start menu entry "DualAudio"; app in `%LOCALAPPDATA%\DualAudioApp\current\` | | |
+| 2 | First start / existing settings | (a) fresh PC user: onboarding shows; (b) with an existing `%LOCALAPPDATA%\DualAudio\settings.json`: no onboarding, auto-connects, audio plays | Log `DualAudio 0.1.0 starting`; Settings → About shows 0.1.0 | | |
+| 3 | Start with Windows from the installed copy | Settings → Start with Windows on; check `HKCU\...\Run` value `DualAudio`; reboot | Value is `"%LOCALAPPDATA%\DualAudioApp\current\DualAudio.exe" --minimized` (expanded path, no version in it); after reboot: tray only, auto-connects | | |
+| 4 | No checks when not installed | `dotnet run --project src/DualAudio.App`, About | "Updates are checked in the installed version only."; Check for updates disabled; log `update checks are off` | | |
+| 5 | Update offered | Release v0.1.1 (RELEASING.md). Installed 0.1.0: wait ≥ 60 s after start or press Check for updates | About: "Version 0.1.1 is ready: restart to install"; dashboard "Update ready" banner; tray tooltip line "Update ready: restart to install"; nothing restarts by itself | | |
+| 6 | Later | Press Later | Banner + tray line gone; app keeps running; Exit from tray → start again → About shows 0.1.1 | | |
+| 7 | Restart now | (with another update ready) Restart now | Phone audio returns to the phone, app comes back within a few seconds as the new version, reconnects, audio plays | | |
+| 8 | Update never interrupts | Update ready while playing a game (fullscreen) for 30+ min | No window, no restart, no focus steal | | |
+| 9 | Settings survive install/update | Before/after rows 1, 6, 7: saved phone, nickname, volume, shortcuts | Unchanged; `%LOCALAPPDATA%\DualAudio` untouched | | |
+| 10 | Offline | Disable network, Check for updates | Quiet "Couldn't check for updates. DualAudio will try again later."; no popup | | |
+| 11 | Uninstall | Running, start-with-Windows on. Settings → Apps → DualAudio → Uninstall | Tray icon disappears (no ghost icon after hovering the tray); Run value `DualAudio` gone; `%LOCALAPPDATA%\DualAudioApp` gone; `%LOCALAPPDATA%\DualAudio` (settings, logs) still there | | |
+| 12 | CI | Push to main / open a PR | CI green; test-results artifact uploaded | | |
+
+**Status:** NOT YET RUN. (Local check 2026-11-13: `build/pack.ps1` produced `DualAudioApp-win-Setup.exe`,
+`DualAudioApp-win-Portable.zip`, `DualAudioApp-0.1.0-full.nupkg`, `releases.win.json`, `assets.win.json`, `RELEASES`;
+the published `DualAudio.exe` reports ProductVersion 0.1.0. Not installed on this PC.)

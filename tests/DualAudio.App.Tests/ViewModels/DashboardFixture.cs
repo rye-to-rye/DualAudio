@@ -4,20 +4,21 @@ using DualAudio.Core.Abstractions;
 using DualAudio.Core.Audio;
 using DualAudio.Core.Settings;
 using DualAudio.Core.Tests.Fakes;
+using DualAudio.Core.Updates;
 
 namespace DualAudio.App.Tests.ViewModels;
 
 /// <summary>A real ConnectionCoordinator + PhoneAudioService on NSubstitute platform fakes, driving the ViewModel.</summary>
 internal sealed class DashboardFixture : IAsyncDisposable
 {
-    public DashboardFixture(AppSettings? settings = null, bool queueUiWork = false)
+    public DashboardFixture(AppSettings? settings = null, bool queueUiWork = false, UpdateService? updates = null)
     {
         Store = new InMemorySettingsStore(settings);
         PhoneAudio = new PhoneAudioService(H.Sessions, H.Sut, Store, H.Clock);
         Outputs.GetDefaultEndpointAsync(default)
             .ReturnsForAnyArgs(Task.FromResult<AudioEndpoint?>(new AudioEndpoint("{0.0.0.00000000}.{headset}", "Headset Earphone", true)));
         Dispatcher = new TestDispatcher { QueueWork = queueUiWork };
-        Vm = new DashboardViewModel(H.Sut, PhoneAudio, H.Watcher, Outputs, Store, Launcher, Dispatcher);
+        Vm = new DashboardViewModel(H.Sut, PhoneAudio, H.Watcher, Outputs, Store, Launcher, Dispatcher, updates: updates);
     }
 
     public CoordinatorHarness H { get; } = new();
@@ -34,9 +35,9 @@ internal sealed class DashboardFixture : IAsyncDisposable
 
     public DashboardViewModel Vm { get; }
 
-    public static async Task<DashboardFixture> CreateAsync(AppSettings? settings = null, bool withPhone = true)
+    public static async Task<DashboardFixture> CreateAsync(AppSettings? settings = null, bool withPhone = true, UpdateService? updates = null)
     {
-        var f = new DashboardFixture(settings);
+        var f = new DashboardFixture(settings, updates: updates);
         await f.PhoneAudio.InitializeAsync();
         if (withPhone)
         {

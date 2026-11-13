@@ -9,6 +9,7 @@ using DualAudio.Core.Abstractions;
 using DualAudio.Core.Audio;
 using DualAudio.Core.Hotkeys;
 using DualAudio.Core.Startup;
+using DualAudio.Core.Updates;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -70,7 +71,7 @@ public partial class App : IAppShell
             });
             await _host.StartAsync();
             var settings = await Task.Run(() => services.GetRequiredService<ISettingsStore>().LoadAsync(CancellationToken.None));
-            _logger.LogInformation("Starting{Minimized}", _startMinimized ? " minimized (tray only)" : string.Empty);
+            _logger.LogInformation("DualAudio {Version} starting{Minimized}", AppInfo.Version, _startMinimized ? " minimized (tray only)" : string.Empty);
 
             // Constructed (and subscribed to the services) before the platform starts raising events.
             services.GetRequiredService<DashboardViewModel>();
@@ -81,11 +82,13 @@ public partial class App : IAppShell
             _tray.Show();
 
             _instance.ActivationRequested += OnActivationRequested;
+            _instance.ExitRequested += OnExitRequested;
             _instance.StartListening();
 
-            // Rewritten on every start while enabled, so a moved exe keeps starting with Windows.
+            // Rewritten on every start while enabled, so a moved exe keeps starting with Windows. Installed copies use
+            // Velopack's stable path %LOCALAPPDATA%\DualAudioApp\current\DualAudio.exe, which survives updates.
             var autoStart = services.GetRequiredService<AutoStartRegistration>();
-            _ = Task.Run(() => autoStart.Sync(settings.StartWithWindows, Environment.ProcessPath));
+            _ = Task.Run(() => autoStart.Sync(settings.StartWithWindows, RunKeyPath.Current()));
 
             await services.GetRequiredService<HotkeyManager>().ApplyFromSettingsAsync();
 
@@ -115,6 +118,11 @@ public partial class App : IAppShell
 
                 _ = Task.Run(runtime.StartAsync);
             }
+
+            // First check 60 s from now, then every 12 h; inert when not installed. Never restarts on its own.
+            var updates = services.GetRequiredService<UpdateService>();
+            updates.RestartRequested += OnUpdateRestartRequested;
+            updates.Start();
 
             _logger.LogInformation("DualAudio started");
         }
@@ -277,9 +285,16 @@ public partial class App : IAppShell
     {
         _logger.LogInformation("Exiting: releasing the phone connection");
         _instance.ActivationRequested -= OnActivationRequested;
+        _instance.ExitRequested -= OnExitRequested;
         var services = _host.Services;
         try
         {
+            // A downloaded update is installed after this process ends (no restart unless "Restart now" was chosen).
+            var updates = services.GetRequiredService<UpdateService>();
+            updates.RestartRequested -= OnUpdateRestartRequested;
+            updates.PrepareForExit();
+            await updates.DisposeAsync();
+
             services.GetRequiredService<HotkeyManager>().Dispose(); // unregisters the global shortcuts
             services.GetRequiredService<DashboardViewModel>().Dispose();
             _onboardingViewModel?.Dispose();
@@ -311,6 +326,16 @@ public partial class App : IAppShell
     }
 
     private void OnActivationRequested(object? sender, EventArgs e) => Dispatcher.BeginInvoke(ShowMainWindow);
+
+    /// <summary>The installer (update/uninstall hook) asked us to exit: same clean path as tray Exit.</summary>
+    private void OnExitRequested(object? sender, EventArgs e)
+    {
+        _logger.LogInformation("Installer asked DualAudio to exit");
+        Dispatcher.BeginInvoke(() => _ = ExitAsync());
+    }
+
+    /// <summary>"Restart now": Velopack waits for this exit, installs, and starts the new version.</summary>
+    private void OnUpdateRestartRequested(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() => _ = ExitAsync());
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {

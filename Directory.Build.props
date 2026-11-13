@@ -5,4 +5,10 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
+
+  <!-- The ONE version source. Release builds override it from the git tag (v0.1.1 -> -p:Version=0.1.1, see
+       build/pack.ps1 and .github/workflows/release.yml). About page and log read it from the assembly. -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
 </Project>

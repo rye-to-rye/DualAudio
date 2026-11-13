@@ -14,6 +14,8 @@ public static class TrayStatus
     /// <summary>Windows cuts tray tooltips at 127 characters.</summary>
     public const int MaxLength = 127;
 
+    public const string UpdateReadyLine = "Update ready: restart to install";
+
     public static string ToolTip(
         ConnectionState state,
         bool isReconnecting,
@@ -22,7 +24,8 @@ public static class TrayStatus
         bool isReceivingAudio,
         bool muted,
         string? phoneName,
-        int volumePercent)
+        int volumePercent,
+        bool updateReady = false)
     {
         var name = string.IsNullOrWhiteSpace(phoneName) ? "your phone" : phoneName;
         var line = state switch
@@ -39,9 +42,25 @@ public static class TrayStatus
         };
 
         var text = Prefix + line;
+        if (updateReady)
+        {
+            // Second line, and never cut: a long phone name is shortened instead.
+            var tail = "\n" + UpdateReadyLine;
+            if (text.Length + tail.Length > MaxLength)
+            {
+                text = text[..(MaxLength - tail.Length - 1)] + "…";
+            }
+
+            text += tail;
+        }
+
         if (state == ConnectionState.Connected)
         {
-            text += $"\nPhone volume {Math.Clamp(volumePercent, 0, 100)}%";
+            var volume = $"\nPhone volume {Math.Clamp(volumePercent, 0, 100)}%";
+            if (!updateReady || text.Length + volume.Length <= MaxLength)
+            {
+                text += volume; // with an update line, the volume line is what gets dropped when space runs out
+            }
         }
 
         return text.Length <= MaxLength ? text : text[..(MaxLength - 1)] + "…";

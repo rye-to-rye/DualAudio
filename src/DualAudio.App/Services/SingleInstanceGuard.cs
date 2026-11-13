@@ -1,26 +1,33 @@
 namespace DualAudio.App.Services;
 
 /// <summary>
-/// One DualAudio per user session: a named Mutex marks the running instance, and a named EventWaitHandle lets a
-/// second launch ask it to show its window before exiting.
+/// One DualAudio per user session: a named Mutex marks the running instance, and named EventWaitHandles let another
+/// process ask it to show its window (second launch) or to exit cleanly (installer update/uninstall hooks).
 /// </summary>
 public sealed class SingleInstanceGuard : IDisposable
 {
     private const string MutexName = @"Local\DualAudio.SingleInstance.v1";
     private const string ActivateEventName = @"Local\DualAudio.Activate.v1";
+    private const string ExitEventName = @"Local\DualAudio.Exit.v1";
 
     private readonly Mutex _mutex;
     private readonly EventWaitHandle _activate;
-    private RegisteredWaitHandle? _registration;
+    private readonly EventWaitHandle _exit;
+    private RegisteredWaitHandle? _activateRegistration;
+    private RegisteredWaitHandle? _exitRegistration;
 
-    private SingleInstanceGuard(Mutex mutex, EventWaitHandle activate)
+    private SingleInstanceGuard(Mutex mutex, EventWaitHandle activate, EventWaitHandle exit)
     {
         _mutex = mutex;
         _activate = activate;
+        _exit = exit;
     }
 
     /// <summary>Raised on a thread-pool thread when another launch asked this instance to show itself.</summary>
     public event EventHandler? ActivationRequested;
+
+    /// <summary>Raised on a thread-pool thread when the installer (update/uninstall hook) asked this instance to exit.</summary>
+    public event EventHandler? ExitRequested;
 
     /// <summary>Returns the guard if this is the first instance; otherwise signals the first one and returns null.</summary>
     public static SingleInstanceGuard? TryAcquire()
@@ -33,22 +40,71 @@ public sealed class SingleInstanceGuard : IDisposable
             return null;
         }
 
-        return new SingleInstanceGuard(mutex, new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName));
+        return new SingleInstanceGuard(
+            mutex,
+            new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName),
+            new EventWaitHandle(false, EventResetMode.AutoReset, ExitEventName));
     }
 
-    public void StartListening() =>
-        _registration ??= ThreadPool.RegisterWaitForSingleObject(
+    /// <summary>
+    /// From another process (installer hooks): asks a running DualAudio to exit through its normal Exit path (phone link
+    /// released, tray icon removed) and waits until it has. True when none was running or it exited within
+    /// <paramref name="timeout"/>.
+    /// </summary>
+    public static bool RequestRunningInstanceToExit(TimeSpan timeout)
+    {
+        if (!Mutex.TryOpenExisting(MutexName, out var mutex))
+        {
+            return true;
+        }
+
+        using (mutex)
+        {
+            using (var exit = new EventWaitHandle(false, EventResetMode.AutoReset, ExitEventName))
+            {
+                exit.Set();
+            }
+
+            try
+            {
+                if (!mutex.WaitOne(timeout))
+                {
+                    return false;
+                }
+            }
+            catch (AbandonedMutexException)
+            {
+                // The instance ended without releasing it: it's gone either way, and we now own it.
+            }
+
+            mutex.ReleaseMutex();
+            return true;
+        }
+    }
+
+    public void StartListening()
+    {
+        _activateRegistration ??= ThreadPool.RegisterWaitForSingleObject(
             _activate,
             (_, _) => ActivationRequested?.Invoke(this, EventArgs.Empty),
             state: null,
             Timeout.Infinite,
             executeOnlyOnce: false);
+        _exitRegistration ??= ThreadPool.RegisterWaitForSingleObject(
+            _exit,
+            (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty),
+            state: null,
+            Timeout.Infinite,
+            executeOnlyOnce: false);
+    }
 
     /// <summary>Must run on the thread that called <see cref="TryAcquire"/> (mutex ownership is per thread).</summary>
     public void Dispose()
     {
-        _registration?.Unregister(null);
+        _activateRegistration?.Unregister(null);
+        _exitRegistration?.Unregister(null);
         _activate.Dispose();
+        _exit.Dispose();
         try
         {
             _mutex.ReleaseMutex();

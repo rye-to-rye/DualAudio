@@ -174,6 +174,38 @@ It is retryable exactly like `Unknown`, including the BUG-001 priming reopen ret
   is scrubbed: Bluetooth addresses → `…EEFF`, nicknames → `<nickname>`, the user profile path → `%USERPROFILE%`. The page
   shows the zip's full path and "Show in folder". The log records only the zip's file name.
 
+### Install, updates, release (Prompt 10)
+
+- **Version:** one source, `Directory.Build.props` `<Version>` (0.1.0); release builds pass `-p:Version` from the tag.
+  `AppInfo.Version` (InformationalVersion without the commit hash) is shown in Settings > About and logged at start
+  (`DualAudio 0.1.0 starting`).
+- **Velopack 1.2.161** (library + `vpk` local tool in `dotnet-tools.json`, same version). `Program.Main` calls
+  `VelopackApp.Build()...Run()` first, before the single-instance mutex, the host and onboarding.
+  `SetAutoApplyOnStartup(false)`: a downloaded update is applied only on Exit or "Restart now", never at start-up.
+  Hooks (`InstallHooks`): after install none (onboarding on first launch as before); before update and before uninstall
+  the running instance is asked to exit through its normal Exit path (`SingleInstanceGuard.RequestRunningInstanceToExit`,
+  named event `Local\DualAudio.Exit.v1`, waits up to 10 s for the mutex), so the phone link is released and the tray
+  icon removed instead of the process being killed; before uninstall the HKCU Run value is also removed.
+- **Folders:** pack id `DualAudioApp` → install root `%LOCALAPPDATA%\DualAudioApp` (`current\DualAudio.exe`,
+  `Update.exe`, `packages\`), deleted by Velopack on uninstall. Settings/logs stay in `%LOCALAPPDATA%\DualAudio`
+  (`AppPaths`), a different folder, so install/update/uninstall never touch them. The pack id must never be
+  "DualAudio" (`InstallAndUpdateTests.Pack_id_never_collides_with_the_settings_folder`).
+- **Start with Windows** writes `RunKeyPath.Current()`: Velopack's stable `...\DualAudioApp\current\DualAudio.exe`
+  (`VelopackLocator` content dir; the `current` folder is replaced in place on update) when installed, else the
+  running exe. Rewritten on every start as before.
+- **`UpdateService`** (Core, `IAppUpdater` from Platform `VelopackUpdater`: `UpdateManager` + `GithubSource`
+  for the public repo, no token, stable releases only): inert when `IsInstalled` is false (dotnet run). First check 60 s
+  after start, then every 12 h; downloads in the background; `Ready` → dashboard banner ("Restart now" / "Later") and
+  tray tooltip line "Update ready: restart to install". "Later" hides both until the next start. Never restarts by
+  itself: `RestartNow` → `WaitExitThenApplyUpdates(restart: true)` + the app's normal Exit; any other Exit →
+  `PrepareForExit` → apply silently after exit, no restart. An update downloaded before an unclean end (Windows
+  shutdown) is found as `UpdatePendingRestart` on the next start and offered again without a network check. Errors
+  (offline, no release, rate limit) are logged and shown only as a quiet line in Settings > About.
+- **CI** (`.github/workflows/ci.yml`): push/PR to `main`, windows-latest, .NET 10, Release build, tests with
+  `Category!=Hardware`, TRX uploaded. **Release** (`release.yml`): tag `v*` → build/test with the tag version →
+  `vpk download github` (delta base) → `build/pack.ps1` → `vpk upload github --publish` → GitHub-generated notes.
+  Optional signing when `SIGN_CERT_BASE64` + `SIGN_CERT_PASSWORD` secrets exist.
+
 ## App (`src/DualAudio.App`)
 
 - `Program.Main`: single instance (named Mutex `Local\DualAudio.SingleInstance.v1`; a second launch sets the

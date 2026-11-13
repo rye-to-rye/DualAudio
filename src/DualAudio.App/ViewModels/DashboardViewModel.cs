@@ -6,6 +6,7 @@ using DualAudio.Core.Abstractions;
 using DualAudio.Core.Audio;
 using DualAudio.Core.Connection;
 using DualAudio.Core.Diagnostics;
+using DualAudio.Core.Updates;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -29,6 +30,7 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
     private readonly ISystemSettingsLauncher _launcher;
     private readonly IUiDispatcher _dispatcher;
     private readonly ILogger _logger;
+    private readonly UpdateService? _updates;
 
     // UI-thread state.
     private string? _preferredDeviceId;
@@ -48,7 +50,8 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         ISettingsStore settings,
         ISystemSettingsLauncher launcher,
         IUiDispatcher dispatcher,
-        ILogger<DashboardViewModel>? logger = null)
+        ILogger<DashboardViewModel>? logger = null,
+        UpdateService? updates = null)
     {
         _coordinator = coordinator;
         _phoneAudio = phoneAudio;
@@ -58,6 +61,7 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         _launcher = launcher;
         _dispatcher = dispatcher;
         _logger = (ILogger?)logger ?? NullLogger.Instance;
+        _updates = updates;
 
         _coordinator.StateChanged += OnConnectionStateChanged;
         _phoneAudio.Changed += OnPhoneAudioChanged;
@@ -65,8 +69,13 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         _watcher.DeviceRemoved += OnDevicesChanged;
         _watcher.EnumerationCompleted += OnDevicesChanged;
         _outputs.DefaultEndpointChanged += OnDefaultEndpointChanged;
+        if (_updates is not null)
+        {
+            _updates.Changed += OnUpdatesChanged;
+        }
 
         ApplyConnectionState();
+        ApplyUpdates();
         ApplyPhoneAudio(_phoneAudio.Current);
     }
 
@@ -126,6 +135,14 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private bool isReceivingAudio;
+
+    /// <summary>Quiet "Update ready" banner: downloaded, and "Later" not pressed since start.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RestartToUpdateCommand), nameof(UpdateLaterCommand))]
+    private bool isUpdateBannerVisible;
+
+    [ObservableProperty]
+    private string updateBannerText = string.Empty;
 
     /// <summary>"Fix audio" link: only while Connected but not receiving (the yellow "Connected" state).</summary>
     [ObservableProperty]
@@ -198,6 +215,10 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         _watcher.DeviceRemoved -= OnDevicesChanged;
         _watcher.EnumerationCompleted -= OnDevicesChanged;
         _outputs.DefaultEndpointChanged -= OnDefaultEndpointChanged;
+        if (_updates is not null)
+        {
+            _updates.Changed -= OnUpdatesChanged;
+        }
     }
 
     // ---------------------------------------------------------------- commands
@@ -286,6 +307,20 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
 
     [RelayCommand(CanExecute = nameof(CanDisconnect))]
     private Task DisconnectAsync() => RunSafeAsync(() => _coordinator.DisconnectAsync(), "disconnect");
+
+    /// <summary>"Restart now": DualAudio exits cleanly (phone link released), Velopack installs and restarts it.</summary>
+    [RelayCommand(CanExecute = nameof(IsUpdateBannerVisible))]
+    private void RestartToUpdate()
+    {
+        if (_updates?.RestartNow() != true)
+        {
+            _logger.LogWarning("Restart to update was not possible");
+        }
+    }
+
+    /// <summary>"Later": hides the banner until the next start; the update is still installed when DualAudio exits.</summary>
+    [RelayCommand(CanExecute = nameof(IsUpdateBannerVisible))]
+    private void UpdateLater() => _updates?.Later();
 
     private bool CanFixAudio() => IsFixAudioVisible;
 
@@ -416,6 +451,21 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
 
     private void OnDevicesChanged(object? sender, EventArgs e) => _dispatcher.Post(RefreshDevices);
 
+    private void OnUpdatesChanged(object? sender, EventArgs e) => _dispatcher.Post(ApplyUpdates);
+
+    private void ApplyUpdates()
+    {
+        if (_disposed || _updates is null)
+        {
+            return;
+        }
+
+        var snapshot = _updates.Current;
+        UpdateBannerText = snapshot.ReadyVersion is { } version ? $"DualAudio {version} is ready. Restart to install it." : string.Empty;
+        IsUpdateBannerVisible = snapshot.IsBannerVisible;
+        UpdateStatus();
+    }
+
     private void OnDefaultEndpointChanged(object? sender, DefaultEndpointChangedEventArgs e)
     {
         var name = DescribeEndpoint(e.Endpoint);
@@ -512,7 +562,8 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
             IsReceivingAudio,
             IsMuted,
             phoneName,
-            PhoneVolume);
+            PhoneVolume,
+            updateReady: IsUpdateBannerVisible);
         StatusKind = status.Kind;
         StatusText = status.Text;
         IsFixAudioVisible = ConnectionState == ConnectionState.Connected && !IsReceivingAudio;

@@ -493,3 +493,7 @@ DualAudio-app/
 *.zip
 
 bug-logs/
+
+# Packaging output (build/pack.ps1)
+artifacts/
+releases/

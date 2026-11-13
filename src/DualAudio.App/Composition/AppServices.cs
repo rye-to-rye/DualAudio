@@ -8,6 +8,7 @@ using DualAudio.Core.Connection;
 using DualAudio.Core.Diagnostics;
 using DualAudio.Core.Hotkeys;
 using DualAudio.Core.Startup;
+using DualAudio.Core.Updates;
 using DualAudio.Infrastructure;
 using DualAudio.Platform.Windows;
 using Microsoft.Extensions.DependencyInjection;
@@ -75,6 +76,12 @@ public static class AppServices
             sp.GetRequiredService<IClock>(),
             sp.GetRequiredService<ConnectionDiagnosticsOptions>(),
             sp.GetRequiredService<ILogger<ConnectionDiagnostics>>()));
+        services.TryAddSingleton(new UpdateOptions());
+        services.TryAddSingleton(sp => new UpdateService(
+            sp.GetRequiredService<IAppUpdater>(),
+            sp.GetRequiredService<IClock>(),
+            sp.GetRequiredService<UpdateOptions>(),
+            sp.GetRequiredService<ILogger<UpdateService>>()));
         services.TryAddSingleton(new ResourceMonitorOptions());
         services.TryAddSingleton(sp => new ResourceMonitor(
             sp.GetRequiredService<IProcessResources>(),

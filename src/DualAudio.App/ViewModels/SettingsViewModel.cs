@@ -8,6 +8,7 @@ using DualAudio.Core.Connection;
 using DualAudio.Core.Hotkeys;
 using DualAudio.Core.Settings;
 using DualAudio.Core.Startup;
+using DualAudio.Core.Updates;
 using DualAudio.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -61,6 +62,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     private readonly AppPaths _paths;
     private readonly ILogger _logger;
     private readonly IDiagnosticsExporter? _diagnosticsExporter;
+    private readonly UpdateService? _updates;
     private bool _loading;
     private string? _savedPhoneId;
 
@@ -75,9 +77,11 @@ public sealed partial class SettingsViewModel : ObservableObject
         IUiDispatcher dispatcher,
         AppPaths paths,
         ILogger<SettingsViewModel>? logger = null,
-        IDiagnosticsExporter? diagnosticsExporter = null)
+        IDiagnosticsExporter? diagnosticsExporter = null,
+        UpdateService? updates = null)
     {
         _diagnosticsExporter = diagnosticsExporter;
+        _updates = updates;
         _settings = settings;
         _hotkeys = hotkeys;
         _autoStart = autoStart;
@@ -153,16 +157,30 @@ public sealed partial class SettingsViewModel : ObservableObject
     internal Task Save { get; private set; } = Task.CompletedTask;
 
     /// <summary>Exe path written to the start-up entry. Overridable for tests.</summary>
-    internal Func<string?> ExePath { get; set; } = () => Environment.ProcessPath;
+    internal Func<string?> ExePath { get; set; } = RunKeyPath.Current; // installed: Velopack stable path (survives updates)
 
     public async Task InitializeAsync()
     {
         _hotkeys.Changed -= OnHotkeysChanged;
         _hotkeys.Changed += OnHotkeysChanged;
+        if (_updates is not null)
+        {
+            _updates.Changed -= OnUpdatesChanged;
+            _updates.Changed += OnUpdatesChanged;
+        }
+
+        RefreshUpdateStatus();
         await LoadAsync();
     }
 
-    public void Detach() => _hotkeys.Changed -= OnHotkeysChanged;
+    public void Detach()
+    {
+        _hotkeys.Changed -= OnHotkeysChanged;
+        if (_updates is not null)
+        {
+            _updates.Changed -= OnUpdatesChanged;
+        }
+    }
 
     // ---------------------------------------------------------------- toggles
 
@@ -277,6 +295,50 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [RelayCommand]
     private Task OpenLogFolderAsync() => _launcher.OpenFolderAsync(_paths.LogDirectory);
+
+    /// <summary>"Last checked … · Up to date", or why updates are off (not installed).</summary>
+    [ObservableProperty]
+    private string updateStatusText = UpdateService.NotInstalledText;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CheckForUpdatesCommand))]
+    private bool isCheckingForUpdates;
+
+    private bool CanCheckForUpdates() =>
+        _updates is not null && !IsCheckingForUpdates && _updates.Current.State != UpdateState.NotInstalled;
+
+    /// <summary>Settings > About "Check for updates": checks and downloads now; the dashboard banner offers the restart.</summary>
+    [RelayCommand(CanExecute = nameof(CanCheckForUpdates))]
+    private async Task CheckForUpdatesAsync()
+    {
+        if (_updates is not { } updates)
+        {
+            return;
+        }
+
+        IsCheckingForUpdates = true;
+        try
+        {
+            await Task.Run(updates.CheckNowAsync);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Checking for updates failed");
+        }
+        finally
+        {
+            IsCheckingForUpdates = false;
+            RefreshUpdateStatus();
+        }
+    }
+
+    private void OnUpdatesChanged(object? sender, EventArgs e) => _dispatcher.Post(RefreshUpdateStatus);
+
+    private void RefreshUpdateStatus()
+    {
+        UpdateStatusText = _updates is null ? UpdateService.NotInstalledText : UpdateService.Describe(_updates.Current);
+        CheckForUpdatesCommand.NotifyCanExecuteChanged();
+    }
 
     private bool CanCopyDiagnostics() => _diagnosticsExporter is not null && !IsCopyingDiagnostics;
 

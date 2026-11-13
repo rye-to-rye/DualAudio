@@ -4,6 +4,7 @@ using DualAudio.Core.Startup;
 using DualAudio.Infrastructure;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Velopack;
 
 namespace DualAudio.App;
 
@@ -12,6 +13,15 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // FIRST, before the mutex, the host and onboarding: when the installer runs us for a hook it handles it and
+        // exits here. Downloaded updates are NOT applied at start-up (that could restart the app in the middle of a
+        // logon or a second launch); UpdateService applies them on Exit or "Restart now".
+        VelopackApp.Build()
+            .SetAutoApplyOnStartup(false)
+            .OnBeforeUpdateFastCallback(_ => InstallHooks.BeforeUpdate())
+            .OnBeforeUninstallFastCallback(_ => InstallHooks.BeforeUninstall())
+            .Run();
+
         using var instance = SingleInstanceGuard.TryAcquire();
         if (instance is null)
         {

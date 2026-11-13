@@ -34,9 +34,10 @@ public sealed class DualAudioRuntime(
             var current = await settings.LoadAsync(token).ConfigureAwait(false);
             if (current.AutoConnectOnStart && current.PreferredDeviceId is { } deviceId)
             {
-                // The coordinator waits for the watcher to report the phone (WaitingForPhone) if needed.
+                // Waits for the watcher to report the phone, retries with ReconnectPolicy (e.g. phone Bluetooth off),
+                // and ends in the calm "Phone not found" state if that runs out.
                 logger.LogInformation("Auto-connecting to remembered phone {Device}", LogRedaction.DeviceId(deviceId));
-                await coordinator.ConnectAsync(deviceId, token).ConfigureAwait(false);
+                await coordinator.AutoConnectAsync(deviceId, token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)

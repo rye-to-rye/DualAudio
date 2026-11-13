@@ -20,6 +20,8 @@ Dependencies point inward: App → Infrastructure, Platform.Windows → Core.
 | `IBluetoothAudioSourceWatcher` | `DeviceWatcher(AudioPlaybackConnection.GetDeviceSelector())` |
 | `IAudioReceiver` | `AudioPlaybackConnection` (TryCreateFromId → StartAsync → OpenAsync → Dispose) |
 | `IRadioMonitor` | `Windows.Devices.Radios.Radio` (read-only) |
+| `IBluetoothRadioControl` | `Radio.RequestAccessAsync` + `SetStateAsync(On)` — only behind an explicit "Turn on Bluetooth" click |
+| `ICapabilityService` | Onboarding checks (`CapabilityReport`) + PC Bluetooth name (`CapabilityService`) |
 | `IAudioSessionController` | WASAPI sessions matched by `PhoneSessionMatcher`, on all render endpoints (`NAudioSessionController`) |
 | `IOutputDeviceService` | Render endpoints + default-endpoint and device-change notifications, read-only (`OutputDeviceService`) |
 | `IHotkeyService` | `RegisterHotKey` |
@@ -85,6 +87,16 @@ timer callbacks enqueue work onto it; double-clicked Connect calls queue up and 
 `Error` states and `Disconnected` after a failed reconnect attempt carry an `ErrorKind`; the UI shows
 `ErrorMessages.For(kind)` (title + one actionable sentence; no HRESULTs in titles).
 
+**Auto-connect (`AutoConnectAsync`, start-up and "Phone not found — Retry")** differs from a user `ConnectAsync`:
+it waits in WaitingForPhone until the watcher reports the phone (no DeviceNotPaired after enumeration), and
+retryable failures (incl. PhoneUnreachable = phone Bluetooth off) go through `ReconnectPolicy` from the first attempt.
+It never interrupts a reconnect already running for the same phone. The BUG-001 priming cycle runs as for any connect.
+
+**Gave up (`GaveUp`)**: Error with `GaveUp = true` when the policy runs out (auto-connect or link-loss reconnect), or when
+an auto-connect's phone isn't in the watcher once enumeration completes (`DeviceNotFound`). The phone stays the target:
+a later watcher `Added` for it starts a fresh attempt; radio Off/On resumes too. User Disconnect clears the target, so
+nothing reconnects after it. The UI shows this as the calm "Phone not found — Retry" panel, not the error banner.
+
 `OpenAsync` UnknownFailure with ExtendedError 0x8007001F (ERROR_GEN_FAILURE) maps to `ErrorKind.PhoneUnreachable`
 ("Can't reach your phone"): on hardware it means phone Bluetooth off, out of range, or not ready yet (BUG-003).
 It is retryable exactly like `Unknown`, including the BUG-001 priming reopen retries.
@@ -96,9 +108,22 @@ It is retryable exactly like `Unknown`, including the BUG-001 priming reopen ret
 - `AppServices.AddDualAudioApp`: Infrastructure (JSON settings, Serilog to `%LOCALAPPDATA%\DualAudio\logs`),
   `AddWindowsPlatform`, Core (`ConnectionCoordinator` **with** `IAudioSessionController`, `PhoneAudioService`), UI.
   `StartupChecks.Verify` refuses to start if the coordinator lacks the session controller (BUG-001 priming).
-- `DualAudioRuntime`: starts phone audio, radio and watcher after all subscribers exist, auto-connects
-  `AppSettings.PreferredDeviceId` (saved on every Connect) when `AutoConnectOnStart`; on exit disposes phone audio,
+- `DualAudioRuntime`: starts phone audio, radio and watcher after all subscribers exist, calls
+  `coordinator.AutoConnectAsync(PreferredDeviceId)` when `AutoConnectOnStart`; on exit disposes phone audio,
   then the coordinator (connection closed and disposed, awaited) before the host and the process go away.
+- Start-up: `OnboardingPolicy.ShouldShow` (no `PreferredDeviceId`) → `OnboardingWindow`, else the dashboard. Closing
+  either window exits; finishing/skipping onboarding opens the dashboard and keeps the connection.
+- Onboarding (`OnboardingViewModel`), 4 steps: (1) `ICapabilityService` checks (OS ≥ 19041 + AudioPlaybackConnection,
+  radio present, radio On, A2DP sources) — OS and radio On block "Next"; "Turn on Bluetooth" calls
+  `IBluetoothRadioControl` (Radio.SetStateAsync) **only from that click**; (2) PC name as phones list it = the NetBIOS
+  computer name (`Environment.MachineName`, e.g. "RYELAPTOP"); not the DNS host name ("RyeLaptop") nor the adapter's
+  DeviceInformation.Name ("RYELAPTOP- front") + iPhone/Android pairing tips; (3) pick the phone from
+  the watcher (resolved names) + optional DualAudio-only nickname; (4) user `ConnectAsync`, success **only** when
+  `PhoneAudioService.IsReceivingAudio` turns true for that phone; help after 60 s (keeps waiting). On success it saves
+  `PreferredDeviceId`, the nickname and `OnboardingCompleted` (which enables "Skip" if onboarding is shown again).
+- Remembered phone: the dashboard saves `PreferredDeviceId` when a connection **succeeds** (enters Connected), and only
+  after it has been initialized (not while onboarding runs). The device list shows the saved phone first, by nickname;
+  "Forget in DualAudio" removes it and its nickname from settings only (no unpair, no disconnect).
 - `DashboardViewModel`: the only place service events are marshalled to the UI dispatcher (`IUiDispatcher`); it
   re-reads service state on each event. All service calls run on the thread pool and never throw into the UI.
 - Settings: `JsonSettingsStore` writes `settings.json.tmp` then `File.Replace`; a corrupt file is renamed to

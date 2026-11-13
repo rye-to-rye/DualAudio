@@ -40,6 +40,7 @@ public sealed class JsonSettingsStoreTests : IDisposable
             PhoneMuted = true,
             Hotkeys = [new HotkeyBinding(HotkeyAction.ToggleMute, HotkeyModifiers.Control | HotkeyModifiers.Shift, 0x4D)],
             StartWithWindows = true,
+            OnboardingCompleted = true,
         };
 
         using (var writer = new JsonSettingsStore(SettingsPath))

@@ -23,6 +23,8 @@ public sealed class RegistrationTests
         provider.GetRequiredService<IOutputDeviceService>().Should().BeOfType<OutputDeviceService>()
             .And.BeSameAs(provider.GetRequiredService<OutputDeviceService>());
         provider.GetRequiredService<DefaultEndpointMasterVolume>().Should().NotBeNull();
+        provider.GetRequiredService<ICapabilityService>().Should().BeOfType<CapabilityService>();
+        provider.GetRequiredService<IBluetoothRadioControl>().Should().BeOfType<BluetoothRadioControl>();
     }
 
     [Fact]

@@ -32,10 +32,12 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
 
     // UI-thread state.
     private string? _preferredDeviceId;
+    private IReadOnlyDictionary<string, string> _nicknames = new Dictionary<string, string>();
     private bool _applyingServiceState;
     private int? _pendingVolume;
     private Task _volumePush = Task.CompletedTask;
     private int _mutePushesInFlight;
+    private bool _initialized;
     private bool _disposed;
 
     public DashboardViewModel(
@@ -71,8 +73,20 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
     public ObservableCollection<DeviceItem> Devices { get; } = [];
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(ConnectCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ConnectCommand), nameof(ForgetDeviceCommand))]
     private DeviceItem? selectedDevice;
+
+    /// <summary>Mirrors <c>AppSettings.AutoConnectOnStart</c>; changing it is saved right away.</summary>
+    [ObservableProperty]
+    private bool autoConnectOnStart = true;
+
+    /// <summary>Calm "Phone not found — Retry" panel: the coordinator gave up on its own (no error banner).</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RetryFindPhoneCommand))]
+    private bool isPhoneNotFound;
+
+    [ObservableProperty]
+    private string phoneNotFoundMessage = PhoneNotFound.Message(null);
 
     [ObservableProperty]
     private ConnectionState connectionState;
@@ -127,6 +141,9 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
     /// <summary>Test hook: the latest mute push.</summary>
     internal Task MutePush { get; private set; } = Task.CompletedTask;
 
+    /// <summary>Test hook: the latest settings write (remember phone, forget, auto-connect toggle).</summary>
+    internal Task SettingsPush { get; private set; } = Task.CompletedTask;
+
     /// <summary>Loads the remembered phone and the current output device. Call once, on the UI thread.</summary>
     public async Task InitializeAsync()
     {
@@ -134,11 +151,25 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         {
             var settings = await Task.Run(() => _settings.LoadAsync(CancellationToken.None));
             _preferredDeviceId = settings.PreferredDeviceId;
+            _nicknames = settings.DeviceNicknames;
+            _applyingServiceState = true;
+            try
+            {
+                AutoConnectOnStart = settings.AutoConnectOnStart;
+            }
+            finally
+            {
+                _applyingServiceState = false;
+            }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Loading settings for the dashboard failed");
         }
+
+        // From now on a successful connection is remembered. Not before: while onboarding runs, only onboarding
+        // saves the phone, and only once audio actually arrives.
+        _initialized = true;
 
         // At start the remembered phone wins over a selection made automatically before settings were read.
         if (_preferredDeviceId is not null && Devices.Any(d => string.Equals(d.Id, _preferredDeviceId, StringComparison.OrdinalIgnoreCase)))
@@ -190,8 +221,62 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await RememberDeviceAsync(device.Id);
+        // The phone is remembered once the connection succeeds (see ApplyConnectionState), not on the click.
         await ConnectToAsync(device.Id);
+    }
+
+    private bool CanForgetDevice() => SelectedDevice is { IsSaved: true };
+
+    /// <summary>
+    /// "Forget in DualAudio": removes the phone (and its nickname) from DualAudio's settings only. It stays paired in
+    /// Windows and an active connection is left alone.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanForgetDevice))]
+    private async Task ForgetDeviceAsync()
+    {
+        if (SelectedDevice is not { } device)
+        {
+            return;
+        }
+
+        _logger.LogInformation("User asked DualAudio to forget {Device}", LogRedaction.DeviceId(device.Id));
+        if (string.Equals(_preferredDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            _preferredDeviceId = null;
+        }
+
+        var nicknames = new Dictionary<string, string>(_nicknames);
+        nicknames.Remove(device.Id);
+        _nicknames = nicknames;
+        RefreshDevices();
+
+        await (SettingsPush = UpdateSettingsAsync(s => s.Forget(device.Id), "forget phone"));
+    }
+
+    private bool CanRetryFindPhone() => IsPhoneNotFound;
+
+    /// <summary>"Phone not found — Retry": looks for the phone again, with automatic retries.</summary>
+    [RelayCommand(CanExecute = nameof(CanRetryFindPhone))]
+    private Task RetryFindPhoneAsync()
+    {
+        var id = _coordinator.ActiveDevice?.Id ?? _preferredDeviceId ?? SelectedDevice?.Id;
+        if (id is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        _logger.LogInformation("User asked to look for {Device} again", LogRedaction.DeviceId(id));
+        return RunSafeAsync(() => _coordinator.AutoConnectAsync(id), "retry finding phone");
+    }
+
+    partial void OnAutoConnectOnStartChanged(bool value)
+    {
+        if (_applyingServiceState)
+        {
+            return;
+        }
+
+        SettingsPush = UpdateSettingsAsync(s => s with { AutoConnectOnStart = value }, "save auto-connect");
     }
 
     private bool CanDisconnect() => IsDisconnectVisible && !IsTransitioning;
@@ -233,20 +318,28 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         return RunSafeAsync(() => _coordinator.ConnectAsync(deviceId), "connect");
     }
 
-    private async Task RememberDeviceAsync(string deviceId)
+    private Task RememberDeviceAsync(string deviceId)
     {
         _preferredDeviceId = deviceId;
-        await RunSafeAsync(
+        RefreshDevices();
+        return UpdateSettingsAsync(
+            s => string.Equals(s.PreferredDeviceId, deviceId, StringComparison.Ordinal) ? s : s with { PreferredDeviceId = deviceId },
+            "save preferred phone");
+    }
+
+    /// <summary>Re-reads the settings (other fields are kept), applies <paramref name="change"/>, saves if it changed.</summary>
+    private Task UpdateSettingsAsync(Func<Core.Settings.AppSettings, Core.Settings.AppSettings> change, string what) =>
+        RunSafeAsync(
             async () =>
             {
                 var current = await _settings.LoadAsync(CancellationToken.None).ConfigureAwait(false);
-                if (current.PreferredDeviceId != deviceId)
+                var updated = change(current);
+                if (!ReferenceEquals(updated, current))
                 {
-                    await _settings.SaveAsync(current with { PreferredDeviceId = deviceId }, CancellationToken.None).ConfigureAwait(false);
+                    await _settings.SaveAsync(updated, CancellationToken.None).ConfigureAwait(false);
                 }
             },
-            "save preferred phone");
-    }
+            what);
 
     // ---------------------------------------------------------------- volume / mute (UI -> service)
 
@@ -327,16 +420,33 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
 
         var state = _coordinator.CurrentState;
         var reconnecting = _coordinator.IsReconnecting;
+        var gaveUp = _coordinator.GaveUp;
+        var wasConnected = ConnectionState == ConnectionState.Connected;
 
         ConnectionState = state;
         IsTransitioning = state is ConnectionState.Enabling or ConnectionState.Opening;
         IsDisconnectVisible = state is ConnectionState.Enabling or ConnectionState.WaitingForPhone or ConnectionState.Opening or ConnectionState.Connected
                               || (state == ConnectionState.Disconnected && reconnecting);
-        Error = ErrorBanner.From(state, _coordinator.LastError, reconnecting);
+        Error = ErrorBanner.From(state, _coordinator.LastError, reconnecting, gaveUp);
+        IsPhoneNotFound = state == ConnectionState.Error && gaveUp;
 
-        if (_coordinator.ActiveDevice is { } active && Devices.FirstOrDefault(d => d.Id == active.Id) is { } item)
+        var active = _coordinator.ActiveDevice;
+        if (active is not null && Devices.FirstOrDefault(d => d.Id == active.Id) is { } item)
         {
             SelectedDevice = item;
+        }
+
+        if (IsPhoneNotFound)
+        {
+            var name = Devices.FirstOrDefault(d => d.Id == active?.Id)?.Name ?? active?.Name;
+            PhoneNotFoundMessage = PhoneNotFound.Message(name);
+        }
+
+        // Remembered on success (entering Connected), so a phone that never connects doesn't replace the saved one.
+        if (_initialized && !wasConnected && state == ConnectionState.Connected && active is not null
+            && !string.Equals(active.Id, _preferredDeviceId, StringComparison.OrdinalIgnoreCase))
+        {
+            SettingsPush = RememberDeviceAsync(active.Id);
         }
 
         UpdateStatus();
@@ -377,7 +487,7 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
 
     private void UpdateStatus()
     {
-        var status = DashboardStatus.From(ConnectionState, _coordinator.IsReconnecting, IsReceivingAudio, IsMuted);
+        var status = DashboardStatus.From(ConnectionState, _coordinator.IsReconnecting, IsReceivingAudio, IsMuted, _coordinator.GaveUp);
         StatusKind = status.Kind;
         StatusText = status.Text;
     }
@@ -390,7 +500,14 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         }
 
         var selectedId = SelectedDevice?.Id;
-        var latest = _coordinator.Devices.Select(DeviceItem.From).OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var latest = _coordinator.Devices
+            .Select(d => DeviceItem.From(
+                d,
+                _nicknames.TryGetValue(d.Id, out var nickname) && !string.IsNullOrWhiteSpace(nickname) ? nickname : null,
+                string.Equals(d.Id, _preferredDeviceId, StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(d => d.IsSaved) // the saved phone first
+            .ThenBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
 
         Devices.Clear();
         foreach (var item in latest)

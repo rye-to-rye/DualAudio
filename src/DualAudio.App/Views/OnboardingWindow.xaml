@@ -1,0 +1,194 @@
+<ui:FluentWindow x:Class="DualAudio.App.Views.OnboardingWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                 xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 xmlns:vm="clr-namespace:DualAudio.App.ViewModels"
+                 xmlns:views="clr-namespace:DualAudio.App.Views"
+                 mc:Ignorable="d"
+                 d:DataContext="{d:DesignInstance Type=vm:OnboardingViewModel}"
+                 Title="Set up DualAudio"
+                 Width="520" Height="680" MinWidth="440" MinHeight="560"
+                 Icon="pack://application:,,,/Assets/DualAudio.ico"
+                 WindowStartupLocation="CenterScreen"
+                 ExtendsContentIntoTitleBar="True"
+                 WindowBackdropType="Mica"
+                 WindowCornerPreference="Round">
+    <ui:FluentWindow.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <views:PassedToBrushConverter x:Key="PassedBrush" />
+    </ui:FluentWindow.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="Set up DualAudio" ShowMaximize="False" />
+
+        <!-- Step header -->
+        <StackPanel Grid.Row="1" Margin="20,4,20,0">
+            <TextBlock FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                <Run Text="Step" />
+                <Run Text="{Binding StepNumber, Mode=OneWay}" />
+                <Run Text="of 4" />
+            </TextBlock>
+            <TextBlock Text="{Binding StepTitle}" FontSize="22" FontWeight="SemiBold" />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="20,12,20,12">
+
+                <!-- 1. Checks -->
+                <StackPanel Visibility="{Binding IsChecksStep, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock TextWrapping="Wrap" Opacity="0.9"
+                               Text="DualAudio plays your phone's audio through this PC's headset, together with your game. First, a quick check." />
+                    <ItemsControl Margin="0,12,0,0" ItemsSource="{Binding Checks}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:CheckRow}">
+                                <ui:Card Margin="0,0,0,8">
+                                    <DockPanel>
+                                        <Ellipse DockPanel.Dock="Left" Width="12" Height="12" Margin="0,4,12,0" VerticalAlignment="Top"
+                                                 Fill="{Binding Passed, Converter={StaticResource PassedBrush}}" />
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                            <TextBlock Margin="0,2,0,0" Text="{Binding Detail}" TextWrapping="Wrap" Opacity="0.85" />
+                                            <ui:Button Margin="0,8,0,0" Content="{Binding FixLabel}"
+                                                       Command="{Binding DataContext.FixCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                       CommandParameter="{Binding}"
+                                                       Visibility="{Binding HasFix, Converter={StaticResource BoolToVisibility}}" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </ui:Card>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Margin="0,4,0,0" Text="{Binding RadioMessage}" TextWrapping="Wrap" Foreground="#E8A0A0" />
+                    <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+                        <ui:Button Content="Check again" Command="{Binding CheckAgainCommand}" />
+                        <ui:ProgressRing Margin="12,0,0,0" Width="18" Height="18" IsIndeterminate="True"
+                                         Visibility="{Binding IsChecking, Converter={StaticResource BoolToVisibility}}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- 2. Pair -->
+                <StackPanel Visibility="{Binding IsPairStep, Converter={StaticResource BoolToVisibility}}">
+                    <ui:Card>
+                        <StackPanel>
+                            <TextBlock Text="This PC is called" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            <TextBlock Text="{Binding PcBluetoothName}" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </ui:Card>
+                    <TextBlock Margin="0,12,0,0" Text="{Binding PairInstruction}" TextWrapping="Wrap" FontSize="15" />
+                    <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Opacity="0.85"
+                               Text="{x:Static vm:OnboardingText.KeepSettingsOpen}" />
+                    <ui:Button Margin="0,8,0,0" Content="Open Bluetooth settings" Command="{Binding OpenBluetoothSettingsCommand}" />
+                    <ui:Card Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="iPhone" FontWeight="SemiBold" />
+                            <TextBlock Margin="0,4,0,0" Text="{Binding IPhonePairTip}" TextWrapping="Wrap" Opacity="0.9" />
+                        </StackPanel>
+                    </ui:Card>
+                    <ui:Card Margin="0,8,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Android" FontWeight="SemiBold" />
+                            <TextBlock Margin="0,4,0,0" Text="{Binding AndroidPairTip}" TextWrapping="Wrap" Opacity="0.9" />
+                        </StackPanel>
+                    </ui:Card>
+                    <TextBlock Margin="0,12,0,0" TextWrapping="Wrap" Opacity="0.85"
+                               Text="Already paired? Just press Next." />
+                </StackPanel>
+
+                <!-- 3. Pick phone -->
+                <StackPanel Visibility="{Binding IsPickStep, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock TextWrapping="Wrap" Opacity="0.9" Text="Choose the phone you just paired." />
+                    <StackPanel Margin="0,12,0,0" Orientation="Horizontal">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasDevices}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <ui:ProgressRing Width="18" Height="18" IsIndeterminate="True" />
+                        <TextBlock Margin="10,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap"
+                                   Text="Waiting for your phone to appear… Finish pairing on the phone." />
+                    </StackPanel>
+                    <ListBox Margin="0,12,0,0" MaxHeight="220" ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}"
+                             DisplayMemberPath="Name" AutomationProperties.Name="Paired phones"
+                             Visibility="{Binding HasDevices, Converter={StaticResource BoolToVisibility}}" />
+                    <TextBlock Margin="0,16,0,0" Text="Nickname (optional)" FontWeight="SemiBold" />
+                    <ui:TextBox Margin="0,6,0,0" Text="{Binding Nickname, UpdateSourceTrigger=PropertyChanged}" MaxLength="40"
+                                PlaceholderText="e.g. My phone" AutomationProperties.Name="Nickname" />
+                    <TextBlock Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               Text="Only used inside DualAudio. Your phone's name in Windows stays the same." />
+                    <ui:Button Margin="0,12,0,0" Content="Phone not listed? Open Bluetooth settings" Command="{Binding OpenBluetoothSettingsCommand}" />
+                </StackPanel>
+
+                <!-- 4. Connect + play -->
+                <StackPanel Visibility="{Binding IsConnectStep, Converter={StaticResource BoolToVisibility}}">
+                    <ui:Card>
+                        <TextBlock Text="{Binding ConnectStatus}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    </ui:Card>
+
+                    <Border Margin="0,12,0,0" Padding="14,12" CornerRadius="6" BorderThickness="1"
+                            BorderBrush="#80C42B1C" Background="#33C42B1C"
+                            Visibility="{Binding IsConnectErrorVisible, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding ConnectError.Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Margin="0,4,0,0" Text="{Binding ConnectError.Action}" TextWrapping="Wrap" Opacity="0.9" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Margin="0,12,0,0" Padding="14,12" CornerRadius="6" BorderThickness="1"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            Visibility="{Binding IsMutedHintVisible, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel>
+                            <TextBlock Text="{x:Static vm:OnboardingText.MutedHint}" TextWrapping="Wrap" />
+                            <ui:Button Margin="0,8,0,0" Content="Unmute" Command="{Binding UnmuteCommand}" />
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel Margin="0,12,0,0" Visibility="{Binding IsNoAudioHelpVisible, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock TextWrapping="Wrap" FontWeight="SemiBold"
+                                   Text="{x:Static vm:OnboardingText.NoAudioHelp}" />
+                        <ui:Card Margin="0,8,0,0">
+                            <StackPanel>
+                                <TextBlock Text="iPhone" FontWeight="SemiBold" />
+                                <TextBlock Margin="0,4,0,0" Text="{Binding IPhoneNoAudioTip}" TextWrapping="Wrap" Opacity="0.9" />
+                            </StackPanel>
+                        </ui:Card>
+                        <ui:Card Margin="0,8,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Android" FontWeight="SemiBold" />
+                                <TextBlock Margin="0,4,0,0" Text="{Binding AndroidNoAudioTip}" TextWrapping="Wrap" Opacity="0.9" />
+                            </StackPanel>
+                        </ui:Card>
+                    </StackPanel>
+
+                    <ui:Button Margin="0,12,0,0" Content="Try again" Command="{Binding TryAgainCommand}"
+                               ToolTip="Reconnect to the phone" />
+                </StackPanel>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Footer -->
+        <DockPanel Grid.Row="3" Margin="20,8,20,16" LastChildFill="False">
+            <ui:Button DockPanel.Dock="Left" Content="Back" Command="{Binding BackCommand}" MinWidth="90" />
+            <ui:Button DockPanel.Dock="Left" Margin="8,0,0,0" Content="Skip" Appearance="Transparent" Command="{Binding SkipCommand}"
+                       Visibility="{Binding CanSkip, Converter={StaticResource BoolToVisibility}}" />
+            <ui:Button DockPanel.Dock="Right" Content="Done" Appearance="Primary" MinWidth="110" Command="{Binding FinishCommand}"
+                       Visibility="{Binding IsConnectStep, Converter={StaticResource BoolToVisibility}}" />
+            <ui:Button DockPanel.Dock="Right" Content="Next" Appearance="Primary" MinWidth="110" Command="{Binding NextCommand}"
+                       Visibility="{Binding IsNextVisible, Converter={StaticResource BoolToVisibility}}" />
+        </DockPanel>
+    </Grid>
+</ui:FluentWindow>

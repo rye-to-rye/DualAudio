@@ -16,11 +16,13 @@ public enum StatusKind
 /// <summary>Status pill: colour + text. Pure, so every state is unit-tested.</summary>
 public sealed record DashboardStatus(StatusKind Kind, string Text)
 {
-    public static DashboardStatus From(ConnectionState state, bool isReconnecting, bool isReceivingAudio, bool muted)
+    public static DashboardStatus From(ConnectionState state, bool isReconnecting, bool isReceivingAudio, bool muted, bool gaveUp = false)
     {
         var mutedSuffix = muted ? " · Muted" : string.Empty;
         return state switch
         {
+            // Calm, not red: DualAudio stopped looking on its own; the user can Retry.
+            ConnectionState.Error when gaveUp => new(StatusKind.Disconnected, "Phone not found"),
             ConnectionState.Idle => new(StatusKind.Disconnected, "Disconnected"),
             ConnectionState.Disconnected when isReconnecting => new(StatusKind.Connecting, "Reconnecting…"),
             ConnectionState.Disconnected => new(StatusKind.Disconnected, "Disconnected"),
@@ -52,10 +54,13 @@ public sealed record ErrorBanner(ErrorKind Kind, string Title, string Message, E
         _ => null,
     };
 
-    /// <summary>Shown in Error, and in Disconnected after a failed reconnect attempt (with "retrying" wording).</summary>
-    public static ErrorBanner? From(ConnectionState state, ErrorKind? error, bool isReconnecting)
+    /// <summary>
+    /// Shown in Error, and in Disconnected after a failed reconnect attempt (with "retrying" wording). Not shown when
+    /// the coordinator gave up on its own (<paramref name="gaveUp"/>): that is the calm "Phone not found" state.
+    /// </summary>
+    public static ErrorBanner? From(ConnectionState state, ErrorKind? error, bool isReconnecting, bool gaveUp = false)
     {
-        if (error is not { } kind || state is not (ConnectionState.Error or ConnectionState.Disconnected))
+        if (gaveUp || error is not { } kind || state is not (ConnectionState.Error or ConnectionState.Disconnected))
         {
             return null;
         }
@@ -75,10 +80,24 @@ public sealed record ErrorBanner(ErrorKind Kind, string Title, string Message, E
 }
 
 /// <summary>A phone in the device list.</summary>
-public sealed record DeviceItem(string Id, string Name)
+/// <param name="Name">The user's nickname if set (DualAudio-only), otherwise the name Windows reports.</param>
+/// <param name="IsSaved">The phone DualAudio remembers (connects to at start-up); listed first.</param>
+public sealed record DeviceItem(string Id, string Name, bool IsSaved = false)
 {
-    public static DeviceItem From(Core.Abstractions.PhoneDevice device) =>
-        new(device.Id, string.IsNullOrWhiteSpace(device.Name) ? "Unnamed phone" : device.Name);
+    public string DisplayName => IsSaved ? Name + " (saved)" : Name;
 
-    public override string ToString() => Name;
+    public static DeviceItem From(Core.Abstractions.PhoneDevice device, string? nickname = null, bool isSaved = false) =>
+        new(device.Id, nickname ?? (string.IsNullOrWhiteSpace(device.Name) ? "Unnamed phone" : device.Name), isSaved);
+
+    public override string ToString() => DisplayName;
+}
+
+/// <summary>The calm "Phone not found" panel (coordinator gave up on its own; not an error).</summary>
+public static class PhoneNotFound
+{
+    public const string Title = "Phone not found";
+
+    public static string Message(string? phoneName) =>
+        $"DualAudio stopped looking for {(string.IsNullOrWhiteSpace(phoneName) ? "your phone" : phoneName)}. " +
+        "Turn on its Bluetooth and keep it near the PC, then press Retry.";
 }

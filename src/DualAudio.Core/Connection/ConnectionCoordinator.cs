@@ -39,7 +39,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     private string? _openDeviceId;
     private OpenCancelReason _openCancelReason;
 
-    private volatile Snapshot _snapshot = new(ConnectionState.Idle, null, null);
+    private volatile Snapshot _snapshot = new(ConnectionState.Idle, null, null, false);
     private int _intentVersion;
     private int _disposed;
     private bool _autoReconnect;
@@ -49,6 +49,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     private PhoneDevice? _targetDevice;
     private bool _isReconnecting;
     private bool _resumeWhenRadioOn;
+    private bool _isAutoConnect;
     private int _attemptId;
     private bool _linkLossPending;
     private int _linkLossId;
@@ -119,6 +120,13 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     public bool IsReconnecting => _reconnect.IsPending;
 
     /// <summary>
+    /// True in Error when DualAudio stopped trying on its own: the reconnect policy ran out of attempts, or an
+    /// auto-connect's phone wasn't reported by the watcher. The UI shows a calm "Phone not found — Retry" instead
+    /// of an error banner. The phone stays the target: if the watcher (re-)adds it, the coordinator connects.
+    /// </summary>
+    public bool GaveUp => _snapshot.GaveUp;
+
+    /// <summary>
     /// True when an <see cref="IAudioSessionController"/> was supplied, so the BUG-001 stale-session priming,
     /// the post-connect safety net and the shutdown session check run. The app asserts this at startup.
     /// </summary>
@@ -141,7 +149,20 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     public Task ConnectAsync(string deviceId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
-        return Enqueue(() => ConnectCoreAsync(deviceId, cancellationToken), cancellationToken);
+        return Enqueue(() => ConnectCoreAsync(deviceId, auto: false, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// Connects to the remembered phone without the user watching (start-up, "Phone not found — Retry"). Unlike
+    /// <see cref="ConnectAsync"/>: waits in WaitingForPhone until the watcher reports the phone (even after the
+    /// initial enumeration), and retryable failures (e.g. phone Bluetooth off, 0x8007001F) are retried with the
+    /// <see cref="ReconnectPolicy"/>. When that runs out, or the enumeration completes without the phone, the state is
+    /// Error with <see cref="GaveUp"/> set. A user Disconnect ends all of it.
+    /// </summary>
+    public Task AutoConnectAsync(string deviceId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
+        return Enqueue(() => ConnectCoreAsync(deviceId, auto: true, cancellationToken), cancellationToken);
     }
 
     /// <summary>User Disconnect: aborts any open attempt, cancels pending reconnects and releases the link.</summary>
@@ -356,13 +377,20 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
 
     // ---------------------------------------------------------------- user intents
 
-    private async Task ConnectCoreAsync(string deviceId, CancellationToken cancellationToken)
+    private async Task ConnectCoreAsync(string deviceId, bool auto, CancellationToken cancellationToken)
     {
         var state = _snapshot.State;
         if (SameDevice(deviceId, _targetDeviceId)
             && state is ConnectionState.Connected or ConnectionState.Opening or ConnectionState.WaitingForPhone)
         {
             _logger.LogDebug("Connect to {Device} ignored: already {State}", LogRedaction.DeviceId(deviceId), state);
+            return;
+        }
+
+        // An auto-connect never interrupts a reconnect that is already under way for the same phone.
+        if (auto && SameDevice(deviceId, _targetDeviceId) && state == ConnectionState.Disconnected && _isReconnecting)
+        {
+            _logger.LogDebug("Auto-connect to {Device} ignored: already reconnecting", LogRedaction.DeviceId(deviceId));
             return;
         }
 
@@ -382,8 +410,18 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         _safetyNetUsed = false;
         _primingAttempt = 0;
         _primingReopenNumber = 0;
-        _logger.LogInformation("Connect requested for {Device}", LogRedaction.DeviceId(deviceId));
-        await BeginConnectAsync(isReconnect: false, cancellationToken).ConfigureAwait(false);
+        _isAutoConnect = auto;
+        _logger.LogInformation("{Kind} requested for {Device}", auto ? "Auto-connect" : "Connect", LogRedaction.DeviceId(deviceId));
+
+        // Auto: behave like a reconnect from the start (wait for the watcher, retry with backoff).
+        _isReconnecting = auto;
+        await BeginConnectAsync(isReconnect: auto, cancellationToken).ConfigureAwait(false);
+
+        if (auto && _snapshot.State == ConnectionState.WaitingForPhone && _watcher.IsEnumerationCompleted && !_devices.Contains(deviceId))
+        {
+            // Enumeration already finished without the phone (otherwise OnEnumerationCompleted decides).
+            GiveUp(ErrorKind.DeviceNotFound, "remembered phone not reported by the watcher");
+        }
     }
 
     private async Task DisconnectCoreAsync()
@@ -391,6 +429,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         StopReconnecting();
         CancelLinkLoss();
         _resumeWhenRadioOn = false;
+        _isAutoConnect = false;
         _targetDeviceId = null;
         _targetDevice = null;
 
@@ -660,6 +699,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         _primingReopenNumber = 0;
         StopReconnecting();
         _resumeWhenRadioOn = false;
+        _isAutoConnect = false;
         _targetDevice = _devices.Find(_targetDeviceId!) ?? _targetDevice;
         SetState(ConnectionState.Connected, null);
         if (_staleAtConnect && !_safetyNetUsed && _sessions is not null)
@@ -829,8 +869,18 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
             return;
         }
 
+        // Retryable but the policy ran out: DualAudio stopped trying on its own (calm "Phone not found").
+        var gaveUp = _isReconnecting && IsRetryable(kind);
         StopReconnecting();
-        SetState(ConnectionState.Error, kind);
+        SetState(ConnectionState.Error, kind, gaveUp);
+    }
+
+    /// <summary>Stops trying on its own but keeps the phone as the target, so a watcher Added connects again.</summary>
+    private void GiveUp(ErrorKind kind, string why)
+    {
+        _logger.LogWarning("Giving up on {Device} for now ({Why}); waiting for the phone to reappear or Retry", LogRedaction.DeviceId(_targetDeviceId), why);
+        StopReconnecting();
+        SetState(ConnectionState.Error, kind, gaveUp: true);
     }
 
     /// <summary>Failure caused by the link/device going away: Bluetooth off wins over "not found".</summary>
@@ -899,8 +949,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         var version = Volatile.Read(ref _intentVersion);
         if (!_reconnect.TrySchedule(() => Enqueue(() => ReconnectAttemptAsync(version))))
         {
-            _isReconnecting = false;
-            _logger.LogWarning("Giving up reconnecting");
+            GiveUp(_snapshot.Error ?? ErrorKind.DeviceNotFound, "reconnect attempts exhausted");
         }
     }
 
@@ -947,11 +996,20 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     private void OnEnumerationCompleted(object? sender, EventArgs e) =>
         _ = Enqueue(() =>
         {
-            if (_snapshot.State == ConnectionState.WaitingForPhone
-                && !_isReconnecting
-                && !_resumeWhenRadioOn
-                && _targetDeviceId is not null
-                && !_devices.Contains(_targetDeviceId))
+            if (_snapshot.State != ConnectionState.WaitingForPhone
+                || _resumeWhenRadioOn
+                || _targetDeviceId is null
+                || _devices.Contains(_targetDeviceId))
+            {
+                return Task.CompletedTask;
+            }
+
+            if (_isAutoConnect)
+            {
+                // The remembered phone isn't paired (any more?). Calm state; a later Added still connects.
+                GiveUp(ErrorKind.DeviceNotFound, "remembered phone not reported by the watcher");
+            }
+            else if (!_isReconnecting)
             {
                 Fail(ErrorKind.DeviceNotPaired, "not found after enumeration");
             }
@@ -983,6 +1041,13 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         if (_snapshot.State == ConnectionState.WaitingForPhone)
         {
             await OpenAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        else if (_snapshot is { State: ConnectionState.Error, GaveUp: true })
+        {
+            // The phone we gave up on came back (re-paired, or Bluetooth cycled): try again with a fresh policy.
+            _logger.LogInformation("Phone {Device} reappeared; connecting again", LogRedaction.DeviceId(device.Id));
+            _isReconnecting = true;
+            await BeginConnectAsync(isReconnect: true, CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -1170,23 +1235,25 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         }
     }
 
-    private void SetState(ConnectionState state, ErrorKind? error)
+    private void SetState(ConnectionState state, ErrorKind? error, bool gaveUp = false)
     {
         var device = state == ConnectionState.Idle || _targetDevice is null
             ? null
             : _targetDevice with { IsConnected = state == ConnectionState.Connected };
+        gaveUp &= state == ConnectionState.Error;
         var previous = _snapshot;
-        if (previous.State == state && previous.Error == error && previous.Device == device)
+        if (previous.State == state && previous.Error == error && previous.Device == device && previous.GaveUp == gaveUp)
         {
             return;
         }
 
-        _snapshot = new Snapshot(state, error, device);
+        _snapshot = new Snapshot(state, error, device, gaveUp);
         _logger.LogInformation(
-            "State {Previous} -> {State}{Error} ({Device})",
+            "State {Previous} -> {State}{Error}{GaveUp} ({Device})",
             previous.State,
             state,
             error is null ? string.Empty : $"({error})",
+            gaveUp ? " [gave up]" : string.Empty,
             LogRedaction.DeviceId(device?.Id));
 
         // Raised by DispatchPendingEvents after the transition lock is released.
@@ -1196,5 +1263,5 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         }
     }
 
-    private sealed record Snapshot(ConnectionState State, ErrorKind? Error, PhoneDevice? Device);
+    private sealed record Snapshot(ConnectionState State, ErrorKind? Error, PhoneDevice? Device, bool GaveUp);
 }

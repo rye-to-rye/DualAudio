@@ -23,6 +23,8 @@ public static class WindowsPlatformServiceCollectionExtensions
         services.TryAddSingleton<IAudioReceiver, PlaybackConnectionReceiver>();
         services.TryAddSingleton<IRadioMonitor, RadioMonitor>();
         services.TryAddSingleton<BluetoothSettingsLauncher>();
+        services.TryAddSingleton<ICapabilityService, CapabilityService>();
+        services.TryAddSingleton<IBluetoothRadioControl, BluetoothRadioControl>(); // user-initiated "Turn on Bluetooth" only
 
         // Core Audio is first touched by the first call on these (no COM in constructors except the worker thread).
         services.TryAddSingleton<IAudioSessionController, NAudioSessionController>();

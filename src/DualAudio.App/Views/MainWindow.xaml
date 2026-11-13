@@ -10,6 +10,7 @@
                  d:DataContext="{d:DesignInstance Type=vm:DashboardViewModel}"
                  Title="DualAudio"
                  Width="480" Height="680" MinWidth="420" MinHeight="520"
+                 Icon="pack://application:,,,/Assets/DualAudio.ico"
                  WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
                  WindowBackdropType="Mica"
@@ -50,12 +51,24 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Phone not found (calm, not an error): auto-connect / reconnect gave up -->
+                <Border Margin="0,12,0,0" Padding="14,12" CornerRadius="6" BorderThickness="1"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        Visibility="{Binding IsPhoneNotFound, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                        <TextBlock Text="Phone not found" FontWeight="SemiBold" FontSize="15" />
+                        <TextBlock Margin="0,4,0,0" Text="{Binding PhoneNotFoundMessage}" TextWrapping="Wrap" Opacity="0.9" />
+                        <ui:Button Margin="0,10,0,0" Content="Retry" Appearance="Primary" Command="{Binding RetryFindPhoneCommand}" />
+                    </StackPanel>
+                </Border>
+
                 <!-- Phone -->
                 <ui:Card Margin="0,16,0,0">
                     <StackPanel>
                         <TextBlock Text="Phone" FontSize="16" FontWeight="SemiBold" />
                         <ComboBox Margin="0,10,0,0" ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}"
-                                  DisplayMemberPath="Name" AutomationProperties.Name="Phone"
+                                  DisplayMemberPath="DisplayName" AutomationProperties.Name="Phone"
                                   IsEnabled="{Binding IsConnectVisible}" />
                         <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
                             <ui:Button Content="Connect" Appearance="Primary" MinWidth="110"
@@ -68,6 +81,13 @@
                                        Command="{Binding AddPhoneCommand}"
                                        ToolTip="Pair a phone in Windows Settings &gt; Bluetooth &amp; devices" />
                         </StackPanel>
+                        <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
+                            <ui:Button Content="Forget in DualAudio" Appearance="Secondary"
+                                       Command="{Binding ForgetDeviceCommand}"
+                                       ToolTip="Removes this phone from DualAudio only. It stays paired in Windows." />
+                        </StackPanel>
+                        <CheckBox Margin="0,10,0,0" Content="Connect to my saved phone when DualAudio starts"
+                                  IsChecked="{Binding AutoConnectOnStart}" />
                     </StackPanel>
                 </ui:Card>
 

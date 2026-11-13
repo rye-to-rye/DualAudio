@@ -48,7 +48,10 @@ public interface IAudioReceiver : IDisposable
     Task CloseAsync();
 }
 
-/// <summary>Reports the Bluetooth radio state. Read-only: DualAudio never toggles the radio.</summary>
+/// <summary>
+/// Reports the Bluetooth radio state. Read-only: DualAudio never toggles the radio on its own (the only
+/// exception is <see cref="IBluetoothRadioControl"/>, behind an explicit "Turn on Bluetooth" click).
+/// </summary>
 public interface IRadioMonitor : IDisposable
 {
     event EventHandler<RadioStatusChangedEventArgs>? StatusChanged;

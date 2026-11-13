@@ -125,3 +125,27 @@ Logs: `%LOCALAPPDATA%\DualAudio\logs\dualaudio-<date>.log`. Settings: `%LOCALAPP
 | 15 | UI never freezes | Throughout | Window stays responsive in every step | | |
 
 **MVP status:** NOT YET ACCEPTED (fill in the table above).
+
+## First run + auto-connect acceptance (Prompt 7)
+
+Settings: `%LOCALAPPDATA%\DualAudio\settings.json`. Log lines to look for are in backticks.
+
+| # | Check | How | Expected | Pass/Fail | Notes |
+|---|-------|-----|----------|-----------|-------|
+| 1 | Onboarding on first run | Close DualAudio, delete `settings.json`, launch | "Set up DualAudio", step 1 of 4; no Skip button; `No saved phone: showing onboarding` | | |
+| 2 | Checks | Look at step 1 | Green rows: Windows version, Bluetooth adapter, Bluetooth is on, Paired phone | | |
+| 3 | Turn on Bluetooth | Turn PC Bluetooth off, press **Check again** | "Bluetooth is on" red with **Turn on Bluetooth**; Next disabled. Bluetooth stays off until you click it; click → turns on, rows go green (or a message says to use Settings) | | |
+| 4 | PC name | Next | Shows this PC's Bluetooth name (log: `PC Bluetooth name: "…"`) and matches what the phone lists | FAIL | name shown: "RYELAPTOP- front"; phone lists "RYELAPTOP" (2026-11-12) |
+| 5 | Pick phone | Next | Phone listed with its real name; type a nickname | | |
+| 6 | Connected ≠ success | Next, don't play anything | "Connected. Play something on your phone now." — no Done yet | | |
+| 7 | 60 s help | Wait 60 s | iPhone/Android tips appear | | |
+| 8 | Success | Play a video on the phone | "It works!" + Done; `Onboarding succeeded`; settings has `preferredDeviceId`, nickname, `onboardingCompleted: true` | | |
+| 9 | Dashboard after Done | Done | Dashboard, still connected, audio keeps playing; phone listed first as "<nickname> (saved)" | | |
+| 10 | Open app → connected | Close, relaunch, play on phone | No onboarding; auto-connects (`Auto-connect requested`), audio plays without manual reconnect (BUG-001: `priming reconnect` may appear) | | |
+| 11 | Disconnect then restart | Disconnect, close, relaunch | Box checked → connects automatically. Uncheck "Connect to my saved phone…", relaunch → stays Disconnected | | |
+| 12 | Phone BT off at start | Phone Bluetooth off, launch | "Reconnecting…" + "Can't reach your phone … retrying automatically" | | |
+| 13 | Comes back by itself | Turn phone Bluetooth on within ~3 min | Connects by itself, no click | PASS | time to connect: ~3-5 s (2026-11-12) |
+| 14 | Calm give-up | Leave phone Bluetooth off > ~4 min | Grey "Phone not found" panel with Retry (no red banner); Retry after turning phone BT on connects | | |
+| 15 | Forget in DualAudio | Select the saved phone, **Forget in DualAudio** | "(saved)" and nickname gone; still connected; phone still paired in Windows Settings; next launch shows onboarding **with** Skip | | |
+
+**Status:** NOT YET ACCEPTED.

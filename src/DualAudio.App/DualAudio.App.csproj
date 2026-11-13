@@ -10,6 +10,7 @@
     <!-- Program.Main owns startup (single instance + Generic Host), so App.xaml is a plain Page. -->
     <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
     <StartupObject>DualAudio.App.Program</StartupObject>
+    <ApplicationIcon>..\..\branding\DualAudio.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -26,6 +27,11 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DualAudio.App.Tests" />
+  </ItemGroup>
+
+  <!-- Window icons (pack://application:,,,/Assets/DualAudio.ico); the same file as ApplicationIcon. -->
+  <ItemGroup>
+    <Resource Include="..\..\branding\DualAudio.ico" Link="Assets\DualAudio.ico" />
   </ItemGroup>
 
 </Project>

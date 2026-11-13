@@ -27,6 +27,8 @@ public static class AppServices
         services.TryAddSingleton<DualAudioRuntime>();
         services.TryAddSingleton<DashboardViewModel>();
         services.TryAddSingleton<MainWindow>();
+        services.TryAddSingleton<OnboardingViewModel>();
+        services.TryAddSingleton<OnboardingWindow>();
         return services;
     }
 

@@ -76,15 +76,21 @@ public sealed class DashboardViewModelTests
     }
 
     [Fact]
-    public async Task Connect_remembers_the_phone_for_the_next_start()
+    public async Task Connect_remembers_the_phone_for_the_next_start_once_it_succeeds()
     {
         await using var f = await DashboardFixture.CreateAsync(AppSettings.Default with { PhoneVolume = 40 });
 
         await f.Vm.ConnectCommand.ExecuteAsync(null);
         await f.SettleAsync();
+        f.Store.Current.PreferredDeviceId.Should().BeNull("a phone that never connects must not replace the saved one");
+
+        f.H.RaiseReceiver(ReceiverState.Opened);
+        await f.SettleAsync();
+        await f.Vm.SettingsPush;
 
         f.Store.Current.PreferredDeviceId.Should().Be(PhoneId);
         f.Store.Current.PhoneVolume.Should().Be(40, "other settings are kept");
+        f.Vm.Devices.Should().ContainSingle().Which.IsSaved.Should().BeTrue();
     }
 
     [Fact]

@@ -127,6 +127,11 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool isReceivingAudio;
 
+    /// <summary>"Fix audio" link: only while Connected but not receiving (the yellow "Connected" state).</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(FixAudioCommand))]
+    private bool isFixAudioVisible;
+
     [ObservableProperty]
     private string outputDeviceName = "…";
 
@@ -281,6 +286,16 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
 
     [RelayCommand(CanExecute = nameof(CanDisconnect))]
     private Task DisconnectAsync() => RunSafeAsync(() => _coordinator.DisconnectAsync(), "disconnect");
+
+    private bool CanFixAudio() => IsFixAudioVisible;
+
+    /// <summary>"Fix audio": clean disconnect, wait for the phone session to go Inactive (max 6 s), reconnect.</summary>
+    [RelayCommand(CanExecute = nameof(CanFixAudio))]
+    private Task FixAudioAsync()
+    {
+        _logger.LogInformation("User pressed Fix audio");
+        return RunSafeAsync(() => _coordinator.FixAudioAsync(), "fix audio");
+    }
 
     private bool CanRunErrorAction() => HasErrorAction;
 
@@ -500,6 +515,7 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
             PhoneVolume);
         StatusKind = status.Kind;
         StatusText = status.Text;
+        IsFixAudioVisible = ConnectionState == ConnectionState.Connected && !IsReceivingAudio;
     }
 
     private void RefreshDevices()

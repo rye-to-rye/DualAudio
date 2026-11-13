@@ -7,8 +7,10 @@ using Microsoft.Extensions.Logging;
 namespace DualAudio.App.Services;
 
 /// <summary>
-/// Starts the platform sources after every subscriber (coordinator, phone audio, ViewModel) exists, auto-connects
-/// the remembered phone, and on exit releases the connection before the process ends (BUG-001).
+/// Starts the platform sources after every subscriber (coordinator, phone audio, diagnostics, ViewModel) exists,
+/// auto-connects the remembered phone, and on exit releases the connection before the process ends (BUG-001).
+/// Sleep/resume, lock/unlock and logoff are handled by the coordinator (it subscribes to <see cref="ISystemPowerEvents"/>);
+/// this class only starts that source.
 /// </summary>
 public sealed class DualAudioRuntime(
     ConnectionCoordinator coordinator,
@@ -16,7 +18,9 @@ public sealed class DualAudioRuntime(
     IRadioMonitor radio,
     IBluetoothAudioSourceWatcher watcher,
     ISettingsStore settings,
-    ILogger<DualAudioRuntime> logger)
+    ILogger<DualAudioRuntime> logger,
+    ISystemPowerEvents? power = null,
+    ConnectionDiagnostics? diagnostics = null)
 {
     private readonly CancellationTokenSource _lifetime = new();
 
@@ -26,16 +30,18 @@ public sealed class DualAudioRuntime(
         var token = _lifetime.Token;
         try
         {
+            diagnostics?.Capture("startup");
             await phoneAudio.InitializeAsync(token).ConfigureAwait(false);
             await radio.StartAsync(token).ConfigureAwait(false);
             logger.LogInformation("Bluetooth radio: {Status}", radio.Status);
             watcher.Start();
+            power?.Start();
 
             var current = await settings.LoadAsync(token).ConfigureAwait(false);
             if (current.AutoConnectOnStart && current.PreferredDeviceId is { } deviceId)
             {
                 // Waits for the watcher to report the phone, retries with ReconnectPolicy (e.g. phone Bluetooth off),
-                // and ends in the calm "Phone not found" state if that runs out.
+                // and ends in the calm "Phone not found" state (with slow background retries) if that runs out.
                 logger.LogInformation("Auto-connecting to remembered phone {Device}", LogRedaction.DeviceId(deviceId));
                 await coordinator.AutoConnectAsync(deviceId, token).ConfigureAwait(false);
             }
@@ -50,7 +56,7 @@ public sealed class DualAudioRuntime(
         }
     }
 
-    /// <summary>Disposes phone audio, then the coordinator, which closes and disposes the connection (awaited).</summary>
+    /// <summary>Disposes phone audio and diagnostics, then the coordinator, which closes and disposes the connection (awaited).</summary>
     public async Task StopAsync()
     {
         await _lifetime.CancelAsync().ConfigureAwait(false);
@@ -61,6 +67,18 @@ public sealed class DualAudioRuntime(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Disposing phone audio failed");
+        }
+
+        try
+        {
+            if (diagnostics is not null)
+            {
+                await diagnostics.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Disposing diagnostics failed");
         }
 
         try

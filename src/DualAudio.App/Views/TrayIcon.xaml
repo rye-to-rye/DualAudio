@@ -84,6 +84,10 @@
                             <TextBlock Text="{Binding Dashboard.SelectedDevice.Name, FallbackValue='No phone yet', TargetNullValue='No phone yet'}"
                                        FontSize="{StaticResource CardHeadingFontSize}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                             <TextBlock Margin="0,2,0,0" Text="{Binding Dashboard.StatusText}" Style="{StaticResource MutedText}" />
+                            <Button x:Name="FlyoutFixAudioLink" Margin="0,6,0,0" HorizontalAlignment="Left" Content="No sound? Fix audio"
+                                    Command="{Binding Dashboard.FixAudioCommand}" Style="{StaticResource LinkButton}"
+                                    AutomationProperties.Name="Fix audio"
+                                    Visibility="{Binding Dashboard.IsFixAudioVisible, Converter={StaticResource BoolToVisibility}}" />
                         </StackPanel>
                     </DockPanel>
                 </Border>

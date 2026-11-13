@@ -129,8 +129,15 @@ public sealed class AutoConnectTests
         h.Sut.GaveUp.Should().BeTrue();
         h.Sut.IsReconnecting.Should().BeFalse();
 
+        // Prompt 9: two slow background attempts (60 s apart); both fail with 0x8007001F, so slow retries pause.
+        await h.AdvanceAsync(TimeSpan.FromSeconds(60));
+        await h.AdvanceAsync(TimeSpan.FromSeconds(60));
+        h.OpenCalls.Should().Be(5);
+        h.Sut.IsSlowRetryPaused.Should().BeTrue();
+
         await h.AdvanceAsync(TimeSpan.FromMinutes(10));
-        h.OpenCalls.Should().Be(3);
+        h.OpenCalls.Should().Be(5, "paused until the watcher reports the phone again or the user presses Retry");
+        h.Sut.GaveUp.Should().BeTrue();
     }
 
     [Fact]

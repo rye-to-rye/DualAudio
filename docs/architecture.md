@@ -57,6 +57,13 @@ stateDiagram-v2
 
     Error --> Idle : radio On, nothing to resume
 
+    Connected --> Opening : safety-net reopen (once per connection)\n"Fix audio" (user)
+    Connected --> Disconnected : receiver reads Closed without an event (10 s check / unlock)
+    Connected --> Disconnected : resume from sleep (+ reconnect)
+    Error --> Enabling : slow retry every 60 s (gave up)\nresume from sleep (gave up)
+    Error --> Error : NoAdapter <-> BluetoothOff (adapter back but off)
+    Connected --> Disconnected : logoff/shutdown (reconnect after 30 s if vetoed)
+
     Enabling --> Disconnected : DisconnectAsync()
     WaitingForPhone --> Disconnected : DisconnectAsync()
     Opening --> Disconnected : DisconnectAsync()
@@ -101,6 +108,40 @@ nothing reconnects after it. The UI shows this as the calm "Phone not found — 
 `OpenAsync` UnknownFailure with ExtendedError 0x8007001F (ERROR_GEN_FAILURE) maps to `ErrorKind.PhoneUnreachable`
 ("Can't reach your phone"): on hardware it means phone Bluetooth off, out of range, or not ready yet (BUG-003).
 It is retryable exactly like `Unknown`, including the BUG-001 priming reopen retries.
+
+### Resilience (Prompt 9, Round 1)
+
+- **Stale-session check before every open** (not only the first). The BUG-001 priming cycle still runs at most once per
+  user connect (and again after resume / "Fix audio"). The **safety net** is now armed for *any* connection whose open
+  met the stale signature (phone session Active on the default endpoint while we held no link): auto-reconnects, slow
+  retries, resume. It reopens once if, 8 s after Connected, there was no peak > 0.001 and no real Inactive → Active on
+  the default endpoint. Never more than **one automatic reopen per connection** (reset by `BeginConnectAsync`, i.e. a
+  link-loss reconnect is a new connection). Not armed without the stale signature, so a merely silent phone is never
+  reopened. Skipped while muted (Windows reports a muted session Inactive). "No session on the default endpoint"
+  (default output switching) no longer counts as Inactive.
+- **"Fix audio"** (`ConnectionCoordinator.FixAudioAsync`, dashboard phone card + tray flyout, visible only while
+  Connected and not receiving): Connected → Opening, close, wait ≥ 3 s and until the phone session is not Active (max
+  6 s), reopen (the reopen may prime if the session is still Active). A failed reopen goes through the reconnect policy.
+- **Sleep/resume** (`ISystemPowerEvents`, Platform `SystemPowerEvents` over `Microsoft.Win32.SystemEvents`, subscribed
+  from an MTA thread so it gets its own hidden window): on resume, if a link is wanted (Connected/Opening/reconnecting/
+  gave up), the old connection is closed, priming is re-enabled and `ReconnectPolicy` reconnects (radio still off →
+  Error(BluetoothOff), resumed by the radio handler). Lock: log only. Unlock: one receiver-state check.
+- **Silent state loss**: while Connected, every 10 s the receiver's `State` is compared with Connected; Closed without an
+  event → the normal link-loss path (settle window, reconnect).
+- **Adapter removed/returned**: `RadioMonitor` → NotPresent → Error(NoAdapter); adapter back but off → Error(BluetoothOff);
+  On → resume. Both DeviceWatchers (A2DP sources and radios) are recreated with backoff (2^n s, max 30 s) if they stop
+  for any reason we didn't ask for; the radio watcher drops radios the new enumeration doesn't re-report.
+- **Slow retry** (`ReconnectOptions.SlowRetryInterval` 60 s): after the fast policy gives up ("Phone not found"), one
+  attempt per minute while the phone is listed by the watcher; each attempt is logged. Paused after
+  `SlowRetryPauseAfterUnreachable` (2) consecutive PhoneUnreachable (0x8007001F) until a watcher Updated/Added for the
+  phone (Updated within 15 s of our own attempt is ignored; after a resume one more failure pauses again) or Retry.
+- **Logoff/shutdown**: `SessionEnding` closes the connection before the handler returns (bounded 3 s). If the process is
+  still alive 30 s later, the logoff was vetoed and the coordinator reconnects.
+- **Diagnostics** (`ConnectionDiagnostics`, Core): one `STATE <trigger>:` log line per coordinator transition
+  (`connect` = Enabling, `opened` = Connected), at `opened+3s` / `opened+10s`, and on every phone-session change:
+  `coord recv session sessionEndpoint sessionState peak sessions default muted priming staleBeforeOpen autoReopenUsed
+  sinceClosed device(…last 4 hex)`. Event-driven only (no polling). The last 50 lines are kept in memory for the bug
+  report (Part D).
 
 ## App (`src/DualAudio.App`)
 

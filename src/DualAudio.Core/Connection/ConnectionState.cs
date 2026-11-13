@@ -91,6 +91,27 @@ public sealed record ConnectionCoordinatorOptions
     /// <summary>On dispose, how long to wait for the phone session to go Inactive after closing (for the log only).</summary>
     public TimeSpan ShutdownSessionCheckTimeout { get; init; } = TimeSpan.FromSeconds(2);
 
+    /// <summary>
+    /// "Fix audio": after the clean close, wait at least this long before reopening (hardware: a reopen 1 s after
+    /// close failed with 0x8007001F; >= 3 s worked)...
+    /// </summary>
+    public TimeSpan FixAudioMinWait { get; init; } = TimeSpan.FromSeconds(3);
+
+    /// <summary>... and at most this long for the phone session to go Inactive.</summary>
+    public TimeSpan FixAudioMaxWait { get; init; } = TimeSpan.FromSeconds(6);
+
+    /// <summary>
+    /// While Connected, how often the receiver's real State is compared with Connected (silent state loss: a
+    /// Closed without a StateChanged event, e.g. after sleep).
+    /// </summary>
+    public TimeSpan HealthCheckInterval { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// After logoff/shutdown closed the connection: if the process is still alive this much later, the logoff was
+    /// vetoed (by another app or the user), so reconnect.
+    /// </summary>
+    public TimeSpan SessionEndVetoReconnectDelay { get; init; } = TimeSpan.FromSeconds(30);
+
     /// <summary>Initial value of <see cref="ConnectionCoordinator.AutoReconnect"/>.</summary>
     public bool AutoReconnect { get; init; } = true;
 

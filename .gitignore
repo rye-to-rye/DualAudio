@@ -491,3 +491,5 @@ DualAudio-app/
 # Release builds
 DualAudio-app/
 *.zip
+
+bug-logs/

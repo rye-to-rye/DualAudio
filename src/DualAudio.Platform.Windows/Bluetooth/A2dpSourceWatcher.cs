@@ -470,10 +470,12 @@ public sealed class A2dpSourceWatcher : IBluetoothAudioSourceWatcher
                     return;
                 }
 
+                // Our own Stop() detaches the session before stopping it, so a Stopped for the current session while
+                // running is never one we asked for: Aborted (e.g. Bluetooth driver restart) or a plain unexpected stop.
                 var status = session.Watcher.Status;
-                if (status == DeviceWatcherStatus.Aborted && _running)
+                if (_running)
                 {
-                    _logger.LogWarning("A2DP source watcher aborted");
+                    _logger.LogWarning("A2DP source watcher stopped unexpectedly (status {Status}); recreating it", status);
                     StopSession_NoLock();
                     ScheduleRestart_NoLock();
                 }

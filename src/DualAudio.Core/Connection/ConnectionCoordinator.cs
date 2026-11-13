@@ -22,6 +22,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     private readonly IAudioReceiver _receiver;
     private readonly IAudioSessionController? _sessions;
     private readonly IRadioMonitor _radio;
+    private readonly ISystemPowerEvents? _power;
     private readonly IClock _clock;
     private readonly ConnectionCoordinatorOptions _options;
     private readonly ILogger _logger;
@@ -62,6 +63,25 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     private bool _reopenPending;
     private int _primingReopenNumber; // 1-based number of the priming reopen in flight; 0 when none
 
+    // Per connection (reset by BeginConnectAsync): the phone session was Active on the default endpoint right before
+    // the open that led to Connected, while we held no link (BUG-001 stale signature). Arms the safety net.
+    private bool _staleBeforeOpen;
+
+    // Slow background retry after the fast retries ran out. Only touched while holding _transitionLock, except
+    // _slowRetryPaused, which the watcher's Updated handler reads first so it doesn't queue work for nothing.
+    private bool _slowRetryActive;
+    private volatile bool _slowRetryPaused;
+    private bool _slowAttemptInFlight;
+    private int _slowRetryId;
+    private int _slowRetryAttempts;
+    private int _slowRetryUnreachable;
+    private DateTimeOffset? _lastAttemptEndedAt;
+
+    // Read from any thread (diagnostics / health loop).
+    private volatile bool _primingActive;
+    private long _lastClosedAtTicks;
+    private int _healthCheckId;
+
     /// <param name="sessions">Optional. When given, enables the BUG-001 stale-session priming cycle, the
     /// post-connect safety net, and the shutdown session check. When null, none of these run.</param>
     public ConnectionCoordinator(
@@ -71,7 +91,8 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         IClock clock,
         ConnectionCoordinatorOptions? options = null,
         ILogger<ConnectionCoordinator>? logger = null,
-        IAudioSessionController? sessions = null)
+        IAudioSessionController? sessions = null,
+        ISystemPowerEvents? power = null)
     {
         ArgumentNullException.ThrowIfNull(watcher);
         ArgumentNullException.ThrowIfNull(receiver);
@@ -82,6 +103,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         _receiver = receiver;
         _sessions = sessions;
         _radio = radio;
+        _power = power;
         _clock = clock;
         _options = options ?? new ConnectionCoordinatorOptions();
         _logger = (ILogger?)logger ?? NullLogger.Instance;
@@ -94,12 +116,21 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         _watcher.EnumerationCompleted += OnEnumerationCompleted;
         _receiver.StateChanged += OnReceiverStateChanged;
         _radio.StatusChanged += OnRadioStatusChanged;
+        if (_power is not null)
+        {
+            _power.Suspending += OnSystemSuspending;
+            _power.Resumed += OnSystemResumed;
+            _power.SessionLocked += OnSessionLocked;
+            _power.SessionUnlocked += OnSessionUnlocked;
+            _power.SessionEnding += OnSessionEnding;
+        }
     }
 
     private enum OpenCancelReason
     {
         None,
         UserDisconnect,
+        SessionEnding,
         DeviceRemoved,
         RadioOff,
         Disposed,
@@ -134,6 +165,25 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
 
     public DateTimeOffset? NextReconnectAt => _reconnect.NextAttemptAt;
 
+    /// <summary>Diagnostics: the receiver's own State (may differ from <see cref="CurrentState"/> for a moment).</summary>
+    public ReceiverState ReceiverState => _receiver.State;
+
+    /// <summary>Diagnostics: a BUG-001 priming cycle (open, close, reopen) is running.</summary>
+    public bool IsPriming => _primingActive;
+
+    /// <summary>Diagnostics: the last open found the phone session already Active (stale signature).</summary>
+    public bool LastOpenFoundStaleSession => Volatile.Read(ref _staleBeforeOpen);
+
+    /// <summary>Diagnostics: this connection already used its one automatic (safety-net) reopen.</summary>
+    public bool AutomaticReopenUsed => Volatile.Read(ref _safetyNetUsed);
+
+    /// <summary>Diagnostics: when the link was last closed (receiver Closed event, or our close of an open link).</summary>
+    public DateTimeOffset? LastClosedAt =>
+        Interlocked.Read(ref _lastClosedAtTicks) is var ticks and > 0 ? new DateTimeOffset(ticks, TimeSpan.Zero) : null;
+
+    /// <summary>Slow background retries are paused after repeated 0x8007001F until the watcher sees the phone again.</summary>
+    public bool IsSlowRetryPaused => _slowRetryPaused;
+
     /// <summary>Reconnect automatically after an unexpected link loss. Can be changed at runtime.</summary>
     public bool AutoReconnect
     {
@@ -165,6 +215,31 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         return Enqueue(() => ConnectCoreAsync(deviceId, auto: true, cancellationToken), cancellationToken);
     }
 
+    /// <summary>
+    /// "Fix audio" (user escape hatch while Connected but silent): closes the link cleanly, waits for the phone session
+    /// to go Inactive (at least <see cref="ConnectionCoordinatorOptions.FixAudioMinWait"/>, at most
+    /// <see cref="ConnectionCoordinatorOptions.FixAudioMaxWait"/>), then reconnects. Ignored unless Connected.
+    /// </summary>
+    public Task FixAudioAsync()
+    {
+        _logger.LogInformation("user requested audio fix");
+        Interlocked.Increment(ref _intentVersion);
+        return Enqueue(FixAudioCoreAsync);
+    }
+
+    /// <summary>
+    /// Logoff/shutdown: closes the connection now, so Windows doesn't end the process with the link open. If the
+    /// process is still alive <see cref="ConnectionCoordinatorOptions.SessionEndVetoReconnectDelay"/> later, the
+    /// logoff was cancelled and the coordinator reconnects.
+    /// </summary>
+    public Task CloseForSessionEndAsync()
+    {
+        Interlocked.Increment(ref _intentVersion);
+        _reconnect.Cancel();
+        CancelOpen(OpenCancelReason.SessionEnding, deviceId: null);
+        return Enqueue(SessionEndCoreAsync);
+    }
+
     /// <summary>User Disconnect: aborts any open attempt, cancels pending reconnects and releases the link.</summary>
     public Task DisconnectAsync()
     {
@@ -188,6 +263,14 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         _watcher.EnumerationCompleted -= OnEnumerationCompleted;
         _receiver.StateChanged -= OnReceiverStateChanged;
         _radio.StatusChanged -= OnRadioStatusChanged;
+        if (_power is not null)
+        {
+            _power.Suspending -= OnSystemSuspending;
+            _power.Resumed -= OnSystemResumed;
+            _power.SessionLocked -= OnSessionLocked;
+            _power.SessionUnlocked -= OnSessionUnlocked;
+            _power.SessionEnding -= OnSessionEnding;
+        }
 
         Interlocked.Increment(ref _intentVersion);
         _reconnect.Dispose();
@@ -396,6 +479,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
 
         Interlocked.Increment(ref _intentVersion);
         StopReconnecting();
+        StopSlowRetry();
         CancelLinkLoss();
         if (state is ConnectionState.Connected or ConnectionState.Opening)
         {
@@ -427,6 +511,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     private async Task DisconnectCoreAsync()
     {
         StopReconnecting();
+        StopSlowRetry();
         CancelLinkLoss();
         _resumeWhenRadioOn = false;
         _isAutoConnect = false;
@@ -449,6 +534,10 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     {
         var deviceId = _targetDeviceId!;
         _primingReopenNumber = 0;
+
+        // A new connection: it gets its own (at most one) automatic safety-net reopen.
+        _safetyNetUsed = false;
+        _staleBeforeOpen = false;
         SetState(ConnectionState.Enabling, null);
 
         if (RadioError(_radio.Status) is { } radioError)
@@ -490,13 +579,22 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
             _openCancelReason = OpenCancelReason.None;
         }
 
-        if (await IsStalePhoneSessionAsync(openCts.Token).ConfigureAwait(false))
+        // Read before every open (not only the first): a reconnect can meet a stale pipeline too, and then the
+        // safety net watches the connection it leads to.
+        var stale = await IsStalePhoneSessionAsync(openCts.Token).ConfigureAwait(false);
+        _staleBeforeOpen = stale;
+        if (stale && !_primedThisConnect)
         {
             // BUG-001: this open only primes the pipeline; Connected comes from the reopen after it.
             _primedThisConnect = true;
             _staleAtConnect = true;
             _primingAttempt = attempt;
+            _primingActive = true;
             _logger.LogWarning("stale phone session detected; priming reconnect");
+        }
+        else if (stale)
+        {
+            _logger.LogWarning("Phone session is already Active before this open (stale signature); the safety net will watch it");
         }
 
         Task<OpenResult> openTask;
@@ -568,6 +666,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         switch (reason)
         {
             case OpenCancelReason.UserDisconnect:
+            case OpenCancelReason.SessionEnding:
             case OpenCancelReason.Disposed:
                 // The queued Disconnect (or disposal) decides the final state.
                 return;
@@ -684,6 +783,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         }
 
         _logger.LogWarning("All priming reopens failed; handing over to reconnect");
+        StopSlowRetry(); // the fast policy takes over; if it runs out, slow retries start again
         SetState(ConnectionState.Disconnected, kind);
         if (AutoReconnect)
         {
@@ -698,25 +798,35 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     {
         _primingReopenNumber = 0;
         StopReconnecting();
+        StopSlowRetry();
         _resumeWhenRadioOn = false;
         _isAutoConnect = false;
         _targetDevice = _devices.Find(_targetDeviceId!) ?? _targetDevice;
         SetState(ConnectionState.Connected, null);
-        if (_staleAtConnect && !_safetyNetUsed && _sessions is not null)
+
+        // Armed by the stale signature of the open that led here: the priming cycle's (first connect) or this
+        // open's own pre-open check (any reconnect: link loss, resume, slow retry, Fix audio). At most one
+        // automatic reopen per connection; a silent phone without the stale signature never triggers it.
+        var armed = _staleAtConnect || _staleBeforeOpen;
+        _staleAtConnect = false;
+        if (armed && !_safetyNetUsed && _sessions is not null)
         {
             StartStaleSessionWatch(_attemptId);
         }
+
+        StartHealthCheck();
     }
 
     // ---------------------------------------------------------------- BUG-001 stale phone session
 
     /// <summary>
     /// True when, before this open, the default endpoint's phone session is already Active although we hold
-    /// no connection: a pipeline left over from a previous process. Checked at most once per user connect.
+    /// no connection: a pipeline left over from a previous process or connection. Checked before every open; the
+    /// priming cycle still runs at most once per user connect.
     /// </summary>
     private async Task<bool> IsStalePhoneSessionAsync(CancellationToken cancellationToken)
     {
-        if (_primedThisConnect || _sessions is null || _receiver.State == ReceiverState.Opened)
+        if (_sessions is null || _receiver.State == ReceiverState.Opened)
         {
             return false;
         }
@@ -777,7 +887,16 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
                         return;
                     }
 
-                    sawInactive |= !status.IsActiveOnDefault;
+                    if (status.Sessions.Any(s => s.Muted))
+                    {
+                        // Windows reports a muted session Inactive, so "no activity" means nothing while muted.
+                        _logger.LogInformation("Safety net: phone audio is muted; not reopening");
+                        return;
+                    }
+
+                    // Only a real Inactive session on the default endpoint counts. "No session on the default" (e.g. the
+                    // default output switched for a moment) must not look like Inactive -> Active.
+                    sawInactive |= status.Sessions.Any(s => s.IsOnDefaultEndpoint && !s.IsActive);
                 }
             }
             catch (OperationCanceledException)
@@ -799,12 +918,276 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
 
         _safetyNetUsed = true;
         _logger.LogWarning(
-            "Phone session was stale before connect and shows no fresh activity {Window} s after Connected; reopening once",
+            "Phone session was stale before connect and shows no fresh activity {Window} s after Connected; automatic reopen (once per connection)",
             _options.StaleSessionWatchWindow.TotalSeconds);
         CancelLinkLoss();
         SetState(ConnectionState.Opening, null);
         await CloseReceiverAsync().ConfigureAwait(false);
         ScheduleReopen(_options.PrimingDelay);
+    }
+
+    // ---------------------------------------------------------------- "Fix audio" (user)
+
+    private async Task FixAudioCoreAsync()
+    {
+        if (_snapshot.State != ConnectionState.Connected || _targetDeviceId is null)
+        {
+            _logger.LogInformation("Audio fix ignored: state is {State}", _snapshot.State);
+            return;
+        }
+
+        CancelLinkLoss();
+        StopReconnecting();
+        StopSlowRetry();
+
+        // A fresh start for this phone: the reconnect may prime again and gets its own safety net.
+        _primedThisConnect = false;
+        _staleAtConnect = false;
+        _safetyNetUsed = false;
+        _primingAttempt = 0;
+        _primingReopenNumber = 0;
+
+        SetState(ConnectionState.Opening, null);
+        await CloseReceiverAsync().ConfigureAwait(false);
+        var attempt = ++_attemptId;
+        _reopenPending = true;
+        WaitForSessionInactiveThenReopen(attempt);
+    }
+
+    /// <summary>
+    /// Outside the transition lock: waits <see cref="ConnectionCoordinatorOptions.FixAudioMinWait"/>, then polls until the
+    /// phone session on the default endpoint is no longer Active or <see cref="ConnectionCoordinatorOptions.FixAudioMaxWait"/>
+    /// has passed, then reopens (serialized, unless the user acted meanwhile).
+    /// </summary>
+    private void WaitForSessionInactiveThenReopen(int attempt)
+    {
+        var version = Volatile.Read(ref _intentVersion);
+        var token = _lifetime.Token;
+        _ = WaitAsync();
+
+        async Task WaitAsync()
+        {
+            var waited = _options.FixAudioMinWait;
+            var inactive = false;
+            try
+            {
+                await _clock.Delay(_options.FixAudioMinWait, token).ConfigureAwait(false);
+                while (version == Volatile.Read(ref _intentVersion))
+                {
+                    inactive = _sessions is null || !(await ReadStatusSafeAsync(token).ConfigureAwait(false)).IsActiveOnDefault;
+                    if (inactive || waited >= _options.FixAudioMaxWait)
+                    {
+                        break;
+                    }
+
+                    await _clock.Delay(_options.StaleSessionPollInterval, token).ConfigureAwait(false);
+                    waited += _options.StaleSessionPollInterval;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            _logger.LogInformation(
+                "Audio fix: phone session {Outcome} after {Seconds:0.0} s; reconnecting",
+                inactive ? "is Inactive" : "is still Active",
+                waited.TotalSeconds);
+            await Enqueue(() => version == Volatile.Read(ref _intentVersion) ? FixAudioReopenAsync(attempt) : Task.CompletedTask)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private async Task FixAudioReopenAsync(int attempt)
+    {
+        if (_snapshot.State != ConnectionState.Opening || attempt != _attemptId)
+        {
+            return;
+        }
+
+        // A failure goes through the reconnect policy (Disconnected + retry), not straight to Error.
+        _isReconnecting = true;
+        _primingReopenNumber = 0;
+        await OpenAsync(CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private async Task<PhoneAudioStatus> ReadStatusSafeAsync(CancellationToken token)
+    {
+        try
+        {
+            return await _sessions!.GetPhoneAudioStatusAsync(token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Reading the phone session failed");
+            return PhoneAudioStatus.Unavailable;
+        }
+    }
+
+    // ---------------------------------------------------------------- silent state loss
+
+    /// <summary>
+    /// While Connected, every <see cref="ConnectionCoordinatorOptions.HealthCheckInterval"/>: if the receiver reads
+    /// Closed although no Closed event arrived, treat it as a lost link. One loop per Connected; it ends on its own.
+    /// </summary>
+    private void StartHealthCheck()
+    {
+        var id = Interlocked.Increment(ref _healthCheckId);
+        var token = _lifetime.Token;
+        _ = LoopAsync();
+
+        async Task LoopAsync()
+        {
+            while (true)
+            {
+                try
+                {
+                    await _clock.Delay(_options.HealthCheckInterval, token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                if (id != Volatile.Read(ref _healthCheckId) || _snapshot.State != ConnectionState.Connected)
+                {
+                    return;
+                }
+
+                await Enqueue(() => CheckReceiverHealthAsync(id, "periodic check")).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private Task CheckReceiverHealthAsync(int healthCheckId, string why)
+    {
+        if (healthCheckId != _healthCheckId || _snapshot.State != ConnectionState.Connected || _linkLossPending)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (_receiver.State == ReceiverState.Closed)
+        {
+            _logger.LogWarning("Receiver reads Closed but no Closed event arrived ({Why}); treating it as a lost link", why);
+            BeginLinkLoss("silent Closed");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    // ---------------------------------------------------------------- sleep / lock / logoff
+
+    private void OnSystemSuspending(object? sender, EventArgs e) =>
+        _logger.LogInformation("System is going to sleep (state {State})", _snapshot.State);
+
+    private void OnSystemResumed(object? sender, EventArgs e)
+    {
+        _logger.LogInformation("System resumed from sleep (state {State})", _snapshot.State);
+
+        // Timers from before the sleep (settle window, safety net, confirmations) are void.
+        Interlocked.Increment(ref _intentVersion);
+        _ = Enqueue(HandleResumeAsync);
+    }
+
+    private void OnSessionLocked(object? sender, EventArgs e) =>
+        _logger.LogInformation("Session locked (state {State}); nothing to do", _snapshot.State);
+
+    private void OnSessionUnlocked(object? sender, EventArgs e)
+    {
+        _logger.LogInformation("Session unlocked (state {State}); checking the link", _snapshot.State);
+        _ = Enqueue(() => CheckReceiverHealthAsync(_healthCheckId, "unlock"));
+    }
+
+    private void OnSessionEnding(object? sender, EventArgs e)
+    {
+        _logger.LogInformation("Logoff/shutdown starting; closing the connection");
+        try
+        {
+            // Windows ends the process soon after this handler returns, so finish the close here (bounded).
+            if (!CloseForSessionEndAsync().Wait(TimeSpan.FromSeconds(3)))
+            {
+                _logger.LogWarning("Closing the connection for logoff/shutdown took longer than 3 s");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Closing the connection for logoff/shutdown failed");
+        }
+    }
+
+    /// <summary>
+    /// After sleep the old AudioPlaybackConnection may be dead without telling us. Release it and reconnect through the
+    /// reconnect policy; the pre-open check primes again if the pipeline is stale.
+    /// </summary>
+    private async Task HandleResumeAsync()
+    {
+        var snapshot = _snapshot;
+        var wanted = _targetDeviceId is not null
+                     && (snapshot.State is ConnectionState.Connected or ConnectionState.Opening or ConnectionState.Enabling
+                         || (snapshot.State == ConnectionState.Disconnected && _isReconnecting)
+                         || snapshot is { State: ConnectionState.Error, GaveUp: true });
+        if (!wanted)
+        {
+            // Idle, user-disconnected, waiting for the watcher, or a Bluetooth error the radio handler resolves.
+            _logger.LogInformation("Resume: nothing to reconnect (state {State})", snapshot.State);
+            return;
+        }
+
+        CancelLinkLoss();
+        StopReconnecting();
+        StopSlowRetry();
+        await CloseReceiverAsync().ConfigureAwait(false);
+
+        _primedThisConnect = false;
+        _staleAtConnect = false;
+        _primingAttempt = 0;
+        _primingReopenNumber = 0;
+        _reopenPending = false;
+        _attemptId++;
+
+        _logger.LogInformation("Resume: released the old connection; reconnecting");
+        SetState(ConnectionState.Disconnected, null);
+        if (RadioError(_radio.Status) is not null)
+        {
+            // Bluetooth isn't back yet: the radio handler resumes once it reports On.
+            _resumeWhenRadioOn = true;
+            SetState(ConnectionState.Error, RadioError(_radio.Status));
+            return;
+        }
+
+        _isReconnecting = true;
+        ScheduleNextReconnect();
+    }
+
+    private async Task SessionEndCoreAsync()
+    {
+        if (_targetDeviceId is null || _snapshot.State == ConnectionState.Idle)
+        {
+            return;
+        }
+
+        CancelLinkLoss();
+        StopReconnecting();
+        StopSlowRetry();
+        await CloseReceiverAsync().ConfigureAwait(false);
+        _logger.LogInformation("Connection closed for logoff/shutdown");
+        SetState(ConnectionState.Disconnected, null);
+
+        // Still running this much later: the logoff/shutdown was cancelled, so reconnect.
+        ScheduleGuarded(_options.SessionEndVetoReconnectDelay, ReconnectAfterVetoedSessionEndAsync);
+    }
+
+    private Task ReconnectAfterVetoedSessionEndAsync()
+    {
+        if (_targetDeviceId is null || _snapshot.State != ConnectionState.Disconnected || _isReconnecting)
+        {
+            return Task.CompletedTask;
+        }
+
+        _logger.LogInformation("Still running after logoff/shutdown started (it was cancelled); reconnecting");
+        _isReconnecting = true;
+        ScheduleNextReconnect();
+        return Task.CompletedTask;
     }
 
     /// <summary>After the shutdown close: logs whether the phone session went Inactive (diagnostics only).</summary>
@@ -856,6 +1239,12 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
             return;
         }
 
+        if (_slowAttemptInFlight)
+        {
+            HandleSlowRetryFailure(kind, detail);
+            return;
+        }
+
         _logger.LogWarning(
             "Connection to {Device} failed: {Kind} ({Detail})",
             LogRedaction.DeviceId(_targetDeviceId),
@@ -873,14 +1262,142 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         var gaveUp = _isReconnecting && IsRetryable(kind);
         StopReconnecting();
         SetState(ConnectionState.Error, kind, gaveUp);
+        if (gaveUp)
+        {
+            StartSlowRetry("fast retries ended");
+        }
     }
 
-    /// <summary>Stops trying on its own but keeps the phone as the target, so a watcher Added connects again.</summary>
+    /// <summary>
+    /// Stops the fast retries but keeps the phone as the target, so a watcher Added connects again; while the phone
+    /// is still reported by the watcher, slow background retries continue.
+    /// </summary>
     private void GiveUp(ErrorKind kind, string why)
     {
         _logger.LogWarning("Giving up on {Device} for now ({Why}); waiting for the phone to reappear or Retry", LogRedaction.DeviceId(_targetDeviceId), why);
         StopReconnecting();
         SetState(ConnectionState.Error, kind, gaveUp: true);
+        StartSlowRetry(why);
+    }
+
+    // ---------------------------------------------------------------- slow background retry
+
+    /// <summary>
+    /// After the fast retries ran out: one attempt every <see cref="ReconnectOptions.SlowRetryInterval"/> while the
+    /// state is the calm "Phone not found" (Error + GaveUp). Not started for a phone the watcher doesn't report
+    /// (a watcher Added handles that one).
+    /// </summary>
+    private void StartSlowRetry(string why)
+    {
+        var interval = _options.Reconnect.SlowRetryInterval;
+        if (interval <= TimeSpan.Zero || _targetDeviceId is null || !_devices.Contains(_targetDeviceId))
+        {
+            return;
+        }
+
+        if (!_slowRetryActive)
+        {
+            _slowRetryActive = true;
+            _slowRetryPaused = false;
+            _slowRetryAttempts = 0;
+            _slowRetryUnreachable = 0;
+        }
+
+        ScheduleSlowRetry(interval, why);
+    }
+
+    private void ScheduleSlowRetry(TimeSpan delay, string why)
+    {
+        var id = ++_slowRetryId;
+        _logger.LogInformation(
+            "Slow retry for {Device} in {Delay} s ({Why})",
+            LogRedaction.DeviceId(_targetDeviceId),
+            delay.TotalSeconds,
+            why);
+        ScheduleGuarded(delay, () => SlowRetryAttemptAsync(id));
+    }
+
+    private void StopSlowRetry()
+    {
+        if (_slowRetryActive)
+        {
+            _logger.LogDebug("Slow retries stopped");
+        }
+
+        _slowRetryActive = false;
+        _slowRetryPaused = false;
+        _slowAttemptInFlight = false;
+        _slowRetryUnreachable = 0;
+        _slowRetryId++;
+    }
+
+    private async Task SlowRetryAttemptAsync(int id)
+    {
+        if (id != _slowRetryId || !_slowRetryActive || _slowRetryPaused || _targetDeviceId is null
+            || _snapshot is not { State: ConnectionState.Error, GaveUp: true })
+        {
+            return;
+        }
+
+        if (RadioError(_radio.Status) is not null || !_devices.Contains(_targetDeviceId))
+        {
+            // The radio handler / a watcher Added takes over from here.
+            _logger.LogInformation("Slow retry skipped (radio {Radio}, phone listed {Listed})", _radio.Status, _devices.Contains(_targetDeviceId));
+            ScheduleSlowRetry(_options.Reconnect.SlowRetryInterval, "skipped");
+            return;
+        }
+
+        _slowRetryAttempts++;
+        _slowAttemptInFlight = true;
+        _logger.LogInformation("Slow retry attempt {Attempt} for {Device}", _slowRetryAttempts, LogRedaction.DeviceId(_targetDeviceId));
+        await BeginConnectAsync(isReconnect: true, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private void HandleSlowRetryFailure(ErrorKind kind, string? detail)
+    {
+        _slowAttemptInFlight = false;
+        _lastAttemptEndedAt = _clock.UtcNow;
+        _slowRetryUnreachable = kind == ErrorKind.PhoneUnreachable ? _slowRetryUnreachable + 1 : 0;
+        _logger.LogWarning("Slow retry attempt {Attempt} failed: {Kind} ({Detail})", _slowRetryAttempts, kind, detail ?? "-");
+
+        if (!IsRetryable(kind))
+        {
+            StopSlowRetry();
+            SetState(ConnectionState.Error, kind);
+            return;
+        }
+
+        SetState(ConnectionState.Error, kind, gaveUp: true);
+        if (_slowRetryUnreachable >= _options.Reconnect.SlowRetryPauseAfterUnreachable)
+        {
+            _slowRetryPaused = true;
+            _logger.LogWarning(
+                "Slow retries paused after {Count} consecutive 0x8007001F (phone unreachable); waiting for the watcher to report the phone again or Retry",
+                _slowRetryUnreachable);
+            return;
+        }
+
+        ScheduleSlowRetry(_options.Reconnect.SlowRetryInterval, "previous attempt failed");
+    }
+
+    /// <summary>A watcher Updated for the phone resumes paused slow retries (unless our own attempt just caused it).</summary>
+    private Task HandleDeviceUpdatedAsync(string deviceId)
+    {
+        if (!_slowRetryPaused || !_slowRetryActive || !SameDevice(deviceId, _targetDeviceId)
+            || _snapshot is not { State: ConnectionState.Error, GaveUp: true })
+        {
+            return Task.CompletedTask;
+        }
+
+        if (_lastAttemptEndedAt is { } ended && _clock.UtcNow - ended < _options.Reconnect.SlowRetryIgnoreUpdatesAfterAttempt)
+        {
+            _logger.LogDebug("Watcher Updated right after our own attempt; slow retries stay paused");
+            return Task.CompletedTask;
+        }
+
+        _slowRetryPaused = false;
+        ScheduleSlowRetry(_options.Reconnect.SlowRetryResumeDelay, "watcher reported the phone again");
+        return Task.CompletedTask;
     }
 
     /// <summary>Failure caused by the link/device going away: Bluetooth off wins over "not found".</summary>
@@ -982,8 +1499,13 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
 
     private void OnDeviceUpdated(object? sender, PhoneDeviceEventArgs e)
     {
-        // Deliberately ignored: Phase 0 saw Name="4" and IsConnected=n/a here after a link drop.
-        _logger.LogTrace("Watcher Updated for {Device} ignored", LogRedaction.DeviceId(e.Device.Id));
+        // Metadata is ignored (Phase 0 saw Name="4" and IsConnected=n/a here after a link drop). The event itself only
+        // serves as "the phone is around again" for paused slow retries.
+        _logger.LogTrace("Watcher Updated for {Device}", LogRedaction.DeviceId(e.Device.Id));
+        if (_slowRetryPaused)
+        {
+            _ = Enqueue(() => HandleDeviceUpdatedAsync(e.Device.Id));
+        }
     }
 
     private void OnDeviceRemoved(object? sender, PhoneDeviceRemovedEventArgs e)
@@ -1017,8 +1539,17 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
             return Task.CompletedTask;
         });
 
-    private void OnReceiverStateChanged(object? sender, ReceiverStateChangedEventArgs e) =>
+    private void OnReceiverStateChanged(object? sender, ReceiverStateChangedEventArgs e)
+    {
+        if (e.State == ReceiverState.Closed)
+        {
+            RecordClosed();
+        }
+
         _ = Enqueue(() => HandleReceiverStateAsync(e.DeviceId, e.State));
+    }
+
+    private void RecordClosed() => Interlocked.Exchange(ref _lastClosedAtTicks, _clock.UtcNow.UtcTicks);
 
     private void OnRadioStatusChanged(object? sender, RadioStatusChangedEventArgs e)
     {
@@ -1046,6 +1577,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
         {
             // The phone we gave up on came back (re-paired, or Bluetooth cycled): try again with a fresh policy.
             _logger.LogInformation("Phone {Device} reappeared; connecting again", LogRedaction.DeviceId(device.Id));
+            StopSlowRetry();
             _isReconnecting = true;
             await BeginConnectAsync(isReconnect: true, CancellationToken.None).ConfigureAwait(false);
         }
@@ -1106,8 +1638,18 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
 
         if (RadioError(status) is { } radioError)
         {
+            if (snapshot.Error is ErrorKind.BluetoothOff or ErrorKind.NoAdapter)
+            {
+                // E.g. the adapter came back (NoAdapter) but is switched off: show what is true now; the resume flag stays.
+                if (snapshot.State == ConnectionState.Error && snapshot.Error != radioError && _targetDeviceId is not null)
+                {
+                    SetState(ConnectionState.Error, radioError);
+                }
+
+                return;
+            }
+
             if (_targetDeviceId is null
-                || snapshot.Error is ErrorKind.BluetoothOff or ErrorKind.NoAdapter
                 || (snapshot.State == ConnectionState.Disconnected && !_isReconnecting))
             {
                 return;
@@ -1117,6 +1659,7 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
             var resume = snapshot.State != ConnectionState.Connected || AutoReconnect;
             CancelLinkLoss();
             StopReconnecting();
+            StopSlowRetry();
             await CloseReceiverAsync().ConfigureAwait(false);
             _resumeWhenRadioOn = resume;
             SetState(ConnectionState.Error, radioError);
@@ -1179,7 +1722,12 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
     {
         try
         {
+            var wasOpen = _receiver.State == ReceiverState.Opened || _snapshot.State == ConnectionState.Connected;
             await AwaitFlushingEventsAsync(_receiver.CloseAsync()).ConfigureAwait(false);
+            if (wasOpen)
+            {
+                RecordClosed();
+            }
         }
         catch (Exception ex)
         {
@@ -1241,6 +1789,11 @@ public sealed class ConnectionCoordinator : IAsyncDisposable
             ? null
             : _targetDevice with { IsConnected = state == ConnectionState.Connected };
         gaveUp &= state == ConnectionState.Error;
+        if (state != ConnectionState.Opening)
+        {
+            _primingActive = false;
+        }
+
         var previous = _snapshot;
         if (previous.State == state && previous.Error == error && previous.Device == device && previous.GaveUp == gaveUp)
         {

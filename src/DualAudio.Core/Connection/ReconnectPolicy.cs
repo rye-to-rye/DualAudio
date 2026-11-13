@@ -12,6 +12,27 @@ public sealed record ReconnectOptions
 
     /// <summary>Attempts before giving up. A successful connection resets the count.</summary>
     public int MaxAttempts { get; init; } = 10;
+
+    /// <summary>
+    /// After the fast attempts run out ("Phone not found"), keep one slow background attempt every this long while
+    /// the PC is awake. <see cref="TimeSpan.Zero"/> turns slow retries off.
+    /// </summary>
+    public TimeSpan SlowRetryInterval { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Slow retries pause after this many consecutive PhoneUnreachable (0x8007001F) failures, until the watcher
+    /// reports the phone Updated/Added again or the user presses Retry.
+    /// </summary>
+    public int SlowRetryPauseAfterUnreachable { get; init; } = 2;
+
+    /// <summary>When a paused slow retry is resumed by a watcher Updated/Added, the next attempt runs after this.</summary>
+    public TimeSpan SlowRetryResumeDelay { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Watcher Updated events this soon after one of our own attempts are ignored (the attempt itself may cause
+    /// them), so a paused slow retry can't resume itself in a loop.
+    /// </summary>
+    public TimeSpan SlowRetryIgnoreUpdatesAfterAttempt { get; init; } = TimeSpan.FromSeconds(15);
 }
 
 /// <summary>

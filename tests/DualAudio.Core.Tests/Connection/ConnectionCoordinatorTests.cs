@@ -551,7 +551,8 @@ public sealed class ConnectionCoordinatorTests
     [Fact]
     public async Task Failed_reconnect_attempts_back_off_exponentially_then_give_up_with_error()
     {
-        var options = new ReconnectOptions { MaxAttempts = 3 };
+        // Fast policy only; the slow background retry after it is covered in SystemEventsRecoveryTests.
+        var options = new ReconnectOptions { MaxAttempts = 3, SlowRetryInterval = TimeSpan.Zero };
         await using var h = new CoordinatorHarness(reconnect: options);
         await h.ConnectFullyAsync();
         h.SetOpenFailure(ErrorKind.DeviceNotFound);

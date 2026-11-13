@@ -5,6 +5,7 @@ using DualAudio.App.Views;
 using DualAudio.Core.Abstractions;
 using DualAudio.Core.Audio;
 using DualAudio.Core.Connection;
+using DualAudio.Core.Diagnostics;
 using DualAudio.Core.Hotkeys;
 using DualAudio.Core.Startup;
 using DualAudio.Infrastructure;
@@ -63,7 +64,16 @@ public static class AppServices
             sp.GetRequiredService<IClock>(),
             sp.GetRequiredService<ConnectionCoordinatorOptions>(),
             sp.GetRequiredService<ILogger<ConnectionCoordinator>>(),
-            sessions: sp.GetRequiredService<IAudioSessionController>()));
+            sessions: sp.GetRequiredService<IAudioSessionController>(),
+            power: sp.GetService<ISystemPowerEvents>()));
+        services.TryAddSingleton(new ConnectionDiagnosticsOptions());
+        services.TryAddSingleton(sp => new ConnectionDiagnostics(
+            sp.GetRequiredService<ConnectionCoordinator>(),
+            sp.GetRequiredService<IAudioSessionController>(),
+            sp.GetRequiredService<IOutputDeviceService>(),
+            sp.GetRequiredService<IClock>(),
+            sp.GetRequiredService<ConnectionDiagnosticsOptions>(),
+            sp.GetRequiredService<ILogger<ConnectionDiagnostics>>()));
         services.TryAddSingleton(sp => new PhoneAudioService(
             sp.GetRequiredService<IAudioSessionController>(),
             sp.GetRequiredService<ConnectionCoordinator>(),

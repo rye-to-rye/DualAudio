@@ -11,6 +11,8 @@ internal sealed class CoordinatorHarness : IAsyncDisposable
     public const string PhoneId = "Bluetooth#Bluetooth00:1a:7d:da:71:13-5c:f3:70:aa:bb:cc";
     public const string OtherPhoneId = "Bluetooth#Bluetooth00:1a:7d:da:71:13-5c:f3:70:11:22:33";
     public const string PhoneName = "Shlawg";
+    public const string HeadsetEndpointId = "{0.0.0.00000000}.{headset}";
+    public const string SpeakersEndpointId = "{0.0.0.00000000}.{speakers}";
 
     private readonly List<ConnectionStateChangedEventArgs> _transitions = [];
 
@@ -29,7 +31,7 @@ internal sealed class CoordinatorHarness : IAsyncDisposable
             Reconnect = reconnect ?? new ReconnectOptions(),
             ShutdownSessionCheckTimeout = TimeSpan.Zero, // the FakeClock never advances during DisposeAsync
         };
-        Sut = new ConnectionCoordinator(Watcher, Receiver, Radio, Clock, Options, logger: null, Sessions);
+        Sut = new ConnectionCoordinator(Watcher, Receiver, Radio, Clock, Options, logger: null, Sessions, Power);
         Sut.StateChanged += (_, e) =>
         {
             lock (_transitions)
@@ -49,14 +51,16 @@ internal sealed class CoordinatorHarness : IAsyncDisposable
 
     public IAudioSessionController Sessions { get; } = Substitute.For<IAudioSessionController>();
 
+    public ISystemPowerEvents Power { get; } = Substitute.For<ISystemPowerEvents>();
+
     /// <summary>What <see cref="Sessions"/> reports. Default: no phone session (never stale).</summary>
     public PhoneAudioStatus PhoneStatus { get; set; } = PhoneAudioStatus.Unavailable;
 
     public int StatusReads => Sessions.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IAudioSessionController.GetPhoneAudioStatusAsync));
 
     /// <summary>Sets <see cref="PhoneStatus"/> to one phone session on the default endpoint.</summary>
-    public void SetPhoneSession(bool active, float peak = 0f) =>
-        PhoneStatus = new PhoneAudioStatus([new PhoneSessionState("{0.0.0.00000000}.{headset}", true, active, 100, false)], peak);
+    public void SetPhoneSession(bool active, float peak = 0f, bool muted = false) =>
+        PhoneStatus = new PhoneAudioStatus([new PhoneSessionState(HeadsetEndpointId, true, active, 100, muted)], peak);
 
     public ConnectionCoordinatorOptions Options { get; }
 
@@ -113,6 +117,22 @@ internal sealed class CoordinatorHarness : IAsyncDisposable
         Receiver.State.Returns(state);
         Receiver.StateChanged += Raise.EventWith(Receiver, new ReceiverStateChangedEventArgs(id, state));
     }
+
+    /// <summary>The receiver's State changes without a StateChanged event (silent state loss, e.g. after sleep).</summary>
+    public void SetReceiverStateSilently(ReceiverState state) => Receiver.State.Returns(state);
+
+    public void RaiseResumed() => Power.Resumed += Raise.Event();
+
+    public void RaiseSuspending() => Power.Suspending += Raise.Event();
+
+    public void RaiseLocked() => Power.SessionLocked += Raise.Event();
+
+    public void RaiseUnlocked() => Power.SessionUnlocked += Raise.Event();
+
+    public void RaiseSessionEnding() => Power.SessionEnding += Raise.Event();
+
+    public void RaiseDeviceUpdated(string id = PhoneId) =>
+        Watcher.DeviceUpdated += Raise.EventWith(Watcher, new PhoneDeviceEventArgs(new PhoneDevice(id, "4", false)));
 
     public void RaiseRadio(RadioStatus status)
     {

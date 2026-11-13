@@ -17,6 +17,7 @@ namespace DualAudio.Platform.Windows.Bluetooth;
 public sealed class RadioMonitor : IRadioMonitor
 {
     private static readonly TimeSpan EnumerationTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan MaxRestartDelay = TimeSpan.FromSeconds(30);
 
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _lifetime = new();
@@ -27,6 +28,8 @@ public sealed class RadioMonitor : IRadioMonitor
     private readonly Dictionary<string, RadioEntry> _radios = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _present = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Task> _pendingAdds = [];
+    private HashSet<string>? _unconfirmed; // radios a recreated watcher has not re-reported yet
+    private int _restartFailures;
     private DeviceWatcher? _watcher;
     private TypedEventHandler<DeviceWatcher, DeviceInformation>? _added;
     private TypedEventHandler<DeviceWatcher, DeviceInformationUpdate>? _removed;
@@ -170,9 +173,18 @@ public sealed class RadioMonitor : IRadioMonitor
         catch (Exception ex)
         {
             // No hot-plug tracking, but still read the radios once.
-            _logger.LogError(ex, "Radio watcher could not start; falling back to a one-time Radio.GetRadiosAsync");
             _watcher = null;
-            _ = FallbackSnapshotAsync();
+            _unconfirmed = null;
+            if (_radios.Count == 0)
+            {
+                _logger.LogError(ex, "Radio watcher could not start; falling back to a one-time Radio.GetRadiosAsync");
+                _ = FallbackSnapshotAsync();
+            }
+            else
+            {
+                // Recreating after a stop failed: the radios already tracked keep reporting their state.
+                _logger.LogError(ex, "Radio watcher could not be recreated; adapter hot-plug is no longer tracked");
+            }
         }
     }
 
@@ -190,6 +202,12 @@ public sealed class RadioMonitor : IRadioMonitor
                 }
 
                 _present.Add(info.Id);
+                _unconfirmed?.Remove(info.Id);
+                if (_radios.ContainsKey(info.Id))
+                {
+                    return; // re-reported by a recreated watcher; already tracked
+                }
+
                 _pendingAdds.RemoveAll(t => t.IsCompleted);
                 _pendingAdds.Add(AddRadioAsync(info.Id));
             }
@@ -296,12 +314,30 @@ public sealed class RadioMonitor : IRadioMonitor
         {
             // AddRadioAsync never throws; this just waits for Radio.FromIdAsync of the initial radios.
             await Task.WhenAll(pendingAdds).ConfigureAwait(false);
+            List<RadioEntry> gone = [];
             lock (_sync)
             {
                 _initialized = true;
+                _restartFailures = 0;
+                foreach (var id in _unconfirmed ?? [])
+                {
+                    _present.Remove(id);
+                    if (_radios.Remove(id, out var entry))
+                    {
+                        gone.Add(entry);
+                    }
+                }
+
+                _unconfirmed = null;
             }
 
-            Recompute("initial enumeration");
+            foreach (var entry in gone)
+            {
+                entry.Detach(_logger);
+                _logger.LogWarning("Bluetooth radio not re-reported after the watcher was recreated; removed");
+            }
+
+            Recompute("enumeration completed");
         }
         catch (Exception ex)
         {
@@ -317,20 +353,72 @@ public sealed class RadioMonitor : IRadioMonitor
     {
         try
         {
+            TimeSpan delay;
             lock (_sync)
             {
                 if (!IsCurrent(watcher))
                 {
                     return;
                 }
+
+                // Dispose() clears _watcher before stopping it, so this stop was not ours (aborted, driver restart).
+                DetachWatcher_NoLock(watcher);
+                _watcher = null;
+                delay = TimeSpan.FromSeconds(Math.Min(Math.Pow(2, _restartFailures), MaxRestartDelay.TotalSeconds));
+                _restartFailures++;
             }
 
-            // Radios already tracked keep reporting StateChanged; only add/remove tracking is lost.
-            _logger.LogWarning("Radio watcher stopped with status {Status}; adapter hot-plug is no longer tracked", watcher.Status);
+            // Radios already tracked keep reporting StateChanged meanwhile; only add/remove tracking pauses.
+            _logger.LogWarning("Radio watcher stopped unexpectedly (status {Status}); recreating it in {Delay}", watcher.Status, delay);
+            _ = RestartWatcherLaterAsync(delay);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Radio watcher Stopped handler failed");
+        }
+    }
+
+    private async Task RestartWatcherLaterAsync(TimeSpan delay)
+    {
+        try
+        {
+            await Task.Delay(delay, _lifetime.Token).ConfigureAwait(false);
+            lock (_sync)
+            {
+                if (_disposed || _watcher is not null)
+                {
+                    return;
+                }
+
+                // Radios tracked now must be re-reported by the new watcher's enumeration, or they are dropped.
+                _unconfirmed = new HashSet<string>(_radios.Keys, StringComparer.OrdinalIgnoreCase);
+                StartWatcher_NoLock();
+            }
+
+            _logger.LogInformation("Radio watcher recreated");
+        }
+        catch (OperationCanceledException)
+        {
+            // Disposed.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Recreating the radio watcher failed");
+        }
+    }
+
+    private void DetachWatcher_NoLock(DeviceWatcher watcher)
+    {
+        try
+        {
+            watcher.Added -= _added;
+            watcher.Removed -= _removed;
+            watcher.EnumerationCompleted -= _completed;
+            watcher.Stopped -= _stopped;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Unsubscribing the radio watcher failed");
         }
     }
 

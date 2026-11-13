@@ -186,3 +186,23 @@ what you see.
 | CS2 | | | |
 
 **Status:** ACCEPTED 2026-11-13 (Ryan: all hardware checks passed: tray, flyout, Exit, hotkeys in-game, start with Windows + reboot auto-connect, idle session). Per-game hotkey rows above not filled in individually.
+
+## Real-world chaos, diagnostics, recovery (Prompt 9)
+
+Logs: `%LOCALAPPDATA%\DualAudio\logs`. Every `STATE …` line is one structured snapshot (coordinator, receiver, phone
+session, default output, muted, priming, seconds since last Closed). When something goes wrong, note the time and
+copy the `STATE` lines around it into the Notes column. Never paste full Bluetooth addresses.
+
+### Round 1 (Parts A + B)
+
+| # | Check | How | Expected | Pass/Fail | Notes |
+|---|-------|-----|----------|-----------|-------|
+| 1 | Sleep/resume while connected | Connected + playing, Start > Power > Sleep, wait 1 min, wake | Within ~5 s of unlocking audio plays again, no clicks/stutter; log: `System resumed from sleep`, `Resume: released the old connection; reconnecting`, then `STATE opened` | | |
+| 2 | Lock/unlock | Connected + playing, Win+L, wait 1 min, unlock | Audio never stops; log: `Session locked … nothing to do`, `Session unlocked … checking the link`; no state change | | |
+| 3 | PC Bluetooth off/on | Turn PC Bluetooth off while playing, then on | Red "Bluetooth is off"; back on → reconnects by itself, audio plays | | |
+| 4 | Adapter unplug/replug | Unplug the USB Bluetooth dongle (else Device Manager → adapter → Disable, then Enable) | Red "No Bluetooth adapter found" (or "Bluetooth is off" while it comes back); replug/enable → reconnects by itself; log may show `watcher stopped unexpectedly … recreating it` | | method used: |
+| 5 | Phone Bluetooth off 10 min | Connected, turn phone Bluetooth off for 10 min, then on | "Reconnecting…" then "Phone not found" after ~3.5 min; log shows `Slow retry attempt N` every 60 s, then `Slow retries paused after 2 consecutive 0x8007001F`; phone BT on → `resuming`/`Slow retry … watcher reported the phone again` and connects within ~1 min without clicking Retry. If it does NOT reconnect: note whether a `Watcher Updated` line appeared, then press Retry | | time to reconnect: |
+| 6 | App restart while phone playing | Playing, tray → Exit, start DualAudio again | Auto-connects, audio plays without manual reconnect; log: `STATE connect … staleBeforeOpen=…`, `priming` if stale; `opened+10s` line shows `sessionState=Active peak>0` | | |
+| 7 | Fix audio link | Connected, phone paused (yellow "Connected") → link "No sound? Fix audio" visible on the phone card and in the tray flyout. Play → link disappears (green). Pause again, click it | Link only in the yellow Connected state; click → "Connecting…" → Connected within ~4-8 s; log: `user requested audio fix`, `Audio fix: phone session …; reconnecting` | | |
+
+**Status:** NOT YET RUN.

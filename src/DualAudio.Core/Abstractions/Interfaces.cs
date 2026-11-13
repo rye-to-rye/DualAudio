@@ -62,6 +62,28 @@ public interface IRadioMonitor : IDisposable
 }
 
 /// <summary>
+/// Sleep/resume, lock/unlock and logoff/shutdown notifications (Microsoft.Win32.SystemEvents). Events may arrive on
+/// any thread. <see cref="SessionEnding"/> handlers must finish their work before returning: Windows ends the
+/// process soon after.
+/// </summary>
+public interface ISystemPowerEvents : IDisposable
+{
+    event EventHandler? Suspending;
+
+    event EventHandler? Resumed;
+
+    event EventHandler? SessionLocked;
+
+    event EventHandler? SessionUnlocked;
+
+    /// <summary>Logoff or shutdown is starting (another app may still veto it).</summary>
+    event EventHandler? SessionEnding;
+
+    /// <summary>Subscribes to the system notifications. Idempotent; never throws.</summary>
+    void Start();
+}
+
+/// <summary>
 /// Controls the phone's audio session(s). Windows keeps one phone session per render endpoint, so
 /// volume/mute apply to ALL matching sessions (see <c>PhoneSessionMatcher</c>) and are re-applied when
 /// a new matching session appears, the default endpoint changes, or an endpoint is added.

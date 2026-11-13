@@ -237,6 +237,11 @@
                                         </Style>
                                     </TextBlock.Style>
                                 </TextBlock>
+                                <!-- Only in the yellow "Connected, not receiving" state: clean reconnect (Prompt 9). -->
+                                <Button x:Name="FixAudioLink" Margin="0,6,0,0" HorizontalAlignment="Left" Content="No sound? Fix audio"
+                                        Command="{Binding FixAudioCommand}" Style="{StaticResource LinkButton}"
+                                        AutomationProperties.Name="Fix audio"
+                                        Visibility="{Binding IsFixAudioVisible, Converter={StaticResource BoolToVisibility}}" />
                             </StackPanel>
                         </DockPanel>
                     </Border>

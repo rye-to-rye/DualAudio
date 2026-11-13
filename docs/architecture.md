@@ -7,7 +7,7 @@
 | `src/DualAudio.Core` | `net10.0` | Interfaces, models, connection state machine, reconnect policy, settings model, phone-session rule. No Windows references (enforced by `CoreIsPlatformIndependentTests`). |
 | `src/DualAudio.Infrastructure` | `net10.0` | Settings persistence, logging setup (later task). |
 | `src/DualAudio.Platform.Windows` | `net10.0-windows10.0.19041.0` | WinRT / CoreAudio / Win32 adapters implementing Core interfaces (later task). |
-| `src/DualAudio.App` | `net10.0-windows10.0.19041.0` (WPF) | Tray UI, DI composition root (later task). |
+| `src/DualAudio.App` | `net10.0-windows10.0.19041.0` (WPF) | Tray UI, windows, hotkey window, DI composition root. |
 | `tests/DualAudio.Core.Tests` | `net10.0` | xUnit + NSubstitute + FluentAssertions 7.x. |
 | `tools/DualAudio.Probe` | `net10.0-windows10.0.19041.0` | Phase 0 hardware probe. |
 
@@ -24,7 +24,8 @@ Dependencies point inward: App → Infrastructure, Platform.Windows → Core.
 | `ICapabilityService` | Onboarding checks (`CapabilityReport`) + PC Bluetooth name (`CapabilityService`) |
 | `IAudioSessionController` | WASAPI sessions matched by `PhoneSessionMatcher`, on all render endpoints (`NAudioSessionController`) |
 | `IOutputDeviceService` | Render endpoints + default-endpoint and device-change notifications, read-only (`OutputDeviceService`) |
-| `IHotkeyService` | `RegisterHotKey` |
+| `IHotkeyService` | `RegisterHotKey`/`UnregisterHotKey` on a message-only `HwndSource` (`Win32HotkeyService`, App: needs WPF) |
+| `IAutoStartEntry` | HKCU `...\CurrentVersion\Run` value `DualAudio` (`RunKeyAutoStartEntry`) |
 | `ISettingsStore` | JSON file in `%LOCALAPPDATA%` |
 | `IClock` | Time / delays (fake in tests) |
 
@@ -129,6 +130,31 @@ It is retryable exactly like `Unknown`, including the BUG-001 priming reopen ret
 - Settings: `JsonSettingsStore` writes `settings.json.tmp` then `File.Replace`; a corrupt file is renamed to
   `settings.json.corrupt-<UTC>.bak` and defaults are used.
 
+### Tray, hotkeys, start with Windows, settings (Prompt 8)
+
+- **Lifetime:** DualAudio lives in the tray (`TrayIcon`, H.NotifyIcon). `ForceCreate(enablesEfficiencyMode: false)`:
+  Efficiency Mode would throttle the process and delay hotkeys. Closing the dashboard hides it
+  (`ShellViewModel.OnMainWindowClosing`); the first hide shows one Windows notification (`TrayNoticeShown`). Only
+  **Exit** (tray menu) ends the process: hotkeys unregistered → coordinator/receiver disposed (awaited) → host disposed
+  → tray icon removed → `Shutdown()`. Closing onboarding before it finished still exits (no saved phone).
+- **Tray UI:** tooltip = `TrayStatus.ToolTip` (state line + "Phone volume N%" while connected), bound to
+  `DashboardViewModel.TrayToolTip`. Left click: flyout (status, volume, mute, connect/disconnect) bound to the same
+  dashboard VM. Right click: Connect/Disconnect, Mute phone audio (checkable), Open DualAudio, Settings, Exit.
+- **Hotkeys:** `HotkeyManager` (Core) registers `AppSettings.Hotkeys` (defaults Ctrl+Alt+M mute, Ctrl+Alt+PgUp/PgDn
+  ±5 %). A change unregisters the old combination, registers the new one, and on refusal re-registers the old one
+  (`InUseByAnotherApp`, nothing saved). Allowed: Ctrl, Alt or Win plus a non-modifier key (`HotkeyFormat.IsAllowed`).
+  `Win32HotkeyService` uses `[LibraryImport]` (App has `AllowUnsafeBlocks` for its generated stubs), marshals every
+  call to the UI dispatcher (RegisterHotKey binds to the creating thread's window) and sets MOD_NOREPEAT for mute only.
+  WM_HOTKEY → `HotkeyPressed` → work on the thread pool. **No input hooks** (no SetWindowsHookEx). Hotkey feedback is
+  the tray tooltip only; nothing opens a window.
+- **Start with Windows:** `AutoStartRegistration.Sync(enabled, Environment.ProcessPath)` writes
+  `"<exe>" --minimized`, or removes the value when off. It runs on every start, so a moved exe is rewritten. With
+  `--minimized` no window is shown unless onboarding is needed (no saved phone).
+- **Settings window:** auto-connect, start with Windows, hotkey recorder (the window's own `PreviewKeyDown` while a
+  row is recording; Esc cancels), nickname of the saved phone, open log folder, Reset (confirm → `AppSettings.Default`,
+  volume 100/unmuted, hotkeys re-applied, start-up entry removed), About (version + NuGet licenses from
+  `ThirdPartyNotices`). `SettingsChanged` → `DashboardViewModel.ReloadSettingsAsync`.
+
 ## Phone audio session rule (`PhoneSessionMatcher`)
 
 Match on any render endpoint: process image `svchost.exe` **and** DisplayName contains `A2DP SNK`.
@@ -164,3 +190,19 @@ A change made in the Windows volume mixer is overwritten by the next re-apply.
 
 `DefaultEndpointMasterVolume` is optional and controls the whole device. It changes the default output's master volume
 (game audio too) and is not used for phone volume.
+
+### Look (Prompt 9: docs/design mockups)
+
+- `Themes/Tokens.xaml` holds every colour (frozen `SolidColorBrush`), radius, spacing value and font size from
+  docs/design/README.md. No other XAML or C# file contains a colour.
+- `Themes/Controls.xaml` (merges Tokens) holds the shared styles: Card, primary/secondary/link/icon/key buttons,
+  status pill + dot, flat slider, check boxes, text box (Tag = placeholder), combo box, radio-card list, kbd chip,
+  segmented level meter, scroll bars, tooltip, tray menu, D-monogram (`MonogramImage`) and line icons. Keyboard focus
+  is always a 2 px accent outline.
+- Every window (and the tray icon) merges `Controls.xaml` in its own resources, so these implicit styles win over
+  WPF-UI's. WPF-UI is kept only for `FluentWindow` + `TitleBar` (dark caption bar, min/close buttons;
+  `WindowBackdropType="None"`, so no Mica); its controls, `ProgressRing` and animated scroll viewer are no longer used.
+- No Effects, gradients, storyboards or animations anywhere (`WindowXamlTests` asserts that no element has an Effect).
+- Per-state texts on the dashboard (pill, phone line, action button, banners) are XAML DataTriggers on existing
+  view-model properties; no view-model change.
+- Tray icon: `branding/DualAudio-muted.ico` while `DashboardViewModel.IsMuted`, otherwise `DualAudio.ico` (style trigger).

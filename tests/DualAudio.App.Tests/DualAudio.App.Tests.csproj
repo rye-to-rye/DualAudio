@@ -31,6 +31,7 @@
     <Compile Include="..\DualAudio.Core.Tests\Fakes\CoordinatorHarness.cs" Link="Fakes\CoordinatorHarness.cs" />
     <Compile Include="..\DualAudio.Core.Tests\Fakes\FakeClock.cs" Link="Fakes\FakeClock.cs" />
     <Compile Include="..\DualAudio.Core.Tests\Fakes\InMemorySettingsStore.cs" Link="Fakes\InMemorySettingsStore.cs" />
+    <Compile Include="..\DualAudio.Core.Tests\Fakes\FakeHotkeyService.cs" Link="Fakes\FakeHotkeyService.cs" />
   </ItemGroup>
 
   <ItemGroup>

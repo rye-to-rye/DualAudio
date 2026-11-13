@@ -41,6 +41,7 @@ public sealed class JsonSettingsStoreTests : IDisposable
             Hotkeys = [new HotkeyBinding(HotkeyAction.ToggleMute, HotkeyModifiers.Control | HotkeyModifiers.Shift, 0x4D)],
             StartWithWindows = true,
             OnboardingCompleted = true,
+            TrayNoticeShown = true,
         };
 
         using (var writer = new JsonSettingsStore(SettingsPath))

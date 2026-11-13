@@ -1,0 +1,154 @@
+<tb:TaskbarIcon x:Class="DualAudio.App.Views.TrayIcon"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                xmlns:tb="clr-namespace:H.NotifyIcon;assembly=H.NotifyIcon.Wpf"
+                xmlns:vm="clr-namespace:DualAudio.App.ViewModels"
+                mc:Ignorable="d"
+                d:DataContext="{d:DesignInstance Type=vm:TrayViewModel}"
+                ToolTipText="{Binding Dashboard.TrayToolTip}"
+                PopupActivation="LeftClick"
+                MenuActivation="RightClick"
+                NoLeftClickDelay="True">
+    <tb:TaskbarIcon.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/DualAudio;component/Themes/Controls.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        </ResourceDictionary>
+    </tb:TaskbarIcon.Resources>
+
+    <!-- Icon: muted variant while phone audio is muted (also after Ctrl+Alt+M mid-game: no window, just the icon) -->
+    <tb:TaskbarIcon.Style>
+        <Style TargetType="tb:TaskbarIcon">
+            <Setter Property="IconSource" Value="pack://application:,,,/DualAudio;component/Assets/DualAudio.ico" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Dashboard.IsMuted}" Value="True">
+                    <Setter Property="IconSource" Value="pack://application:,,,/DualAudio;component/Assets/DualAudio-muted.ico" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </tb:TaskbarIcon.Style>
+
+    <!-- Right-click menu -->
+    <tb:TaskbarIcon.ContextMenu>
+        <ContextMenu Style="{StaticResource TrayMenu}">
+            <MenuItem Header="Connect" Command="{Binding Dashboard.ConnectCommand}" Style="{StaticResource TrayMenuItem}"
+                      Visibility="{Binding Dashboard.IsConnectVisible, Converter={StaticResource BoolToVisibility}}" />
+            <MenuItem Header="Disconnect" Command="{Binding Dashboard.DisconnectCommand}" Style="{StaticResource TrayMenuItem}"
+                      Visibility="{Binding Dashboard.IsDisconnectVisible, Converter={StaticResource BoolToVisibility}}" />
+            <MenuItem Header="Mute phone audio" IsCheckable="True" IsChecked="{Binding Dashboard.IsMuted, Mode=TwoWay}" Style="{StaticResource TrayMenuItem}" />
+            <Separator Style="{StaticResource TrayMenuSeparator}" />
+            <MenuItem Header="Open DualAudio" Command="{Binding Shell.OpenMainCommand}" FontWeight="SemiBold" Style="{StaticResource TrayMenuItem}" />
+            <MenuItem Header="Settings" Command="{Binding Shell.OpenSettingsCommand}" Style="{StaticResource TrayMenuItem}" />
+            <Separator Style="{StaticResource TrayMenuSeparator}" />
+            <MenuItem Header="Exit" Command="{Binding Shell.ExitCommand}" Style="{StaticResource TrayMenuItem}" />
+        </ContextMenu>
+    </tb:TaskbarIcon.ContextMenu>
+
+    <!-- Left-click flyout (MinFlyout.html, 360 x 460) -->
+    <tb:TaskbarIcon.TrayPopup>
+        <Border Width="360" MinHeight="420" Padding="20" Style="{StaticResource Card}"
+                TextElement.Foreground="{StaticResource TextBrush}" TextElement.FontFamily="{StaticResource UiFont}"
+                TextElement.FontSize="{StaticResource BodyFontSize}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Header -->
+                <DockPanel Grid.Row="0">
+                    <Button DockPanel.Dock="Right" Style="{StaticResource GhostIconButton}" Command="{Binding Shell.OpenSettingsCommand}"
+                            ToolTip="Settings" AutomationProperties.Name="Settings">
+                        <Viewbox Width="16" Height="16">
+                            <Path Style="{StaticResource Icon}" Data="{StaticResource GearIcon}" />
+                        </Viewbox>
+                    </Button>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Image Source="{StaticResource MonogramOnRaisedImage}" Width="22" Height="22" />
+                        <TextBlock Margin="10,0,0,0" Text="DualAudio" FontSize="{StaticResource CardHeadingFontSize}" FontWeight="Bold" VerticalAlignment="Center" />
+                    </StackPanel>
+                </DockPanel>
+
+                <!-- Status tile -->
+                <Border Grid.Row="1" Margin="0,18,0,0" Style="{StaticResource Tile}" AutomationProperties.Name="Connection status">
+                    <DockPanel>
+                        <Ellipse DockPanel.Dock="Left" Margin="0,0,12,0">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse" BasedOn="{StaticResource StatusDot}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Dashboard.StatusKind}" Value="{x:Static vm:StatusKind.Receiving}">
+                                            <Setter Property="Fill" Value="{StaticResource AccentBrush}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Dashboard.StatusKind}" Value="{x:Static vm:StatusKind.Connected}">
+                                            <Setter Property="Fill" Value="{StaticResource AccentBrush}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Dashboard.StatusKind}" Value="{x:Static vm:StatusKind.Error}">
+                                            <Setter Property="Fill" Value="{StaticResource WarningBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <StackPanel>
+                            <TextBlock Text="{Binding Dashboard.SelectedDevice.Name, FallbackValue='No phone yet', TargetNullValue='No phone yet'}"
+                                       FontSize="{StaticResource CardHeadingFontSize}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Margin="0,2,0,0" Text="{Binding Dashboard.StatusText}" Style="{StaticResource MutedText}" />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <!-- Volume -->
+                <StackPanel Grid.Row="2" Margin="0,18,0,0" IsEnabled="{Binding Dashboard.IsPhoneAudioAvailable}" Background="Transparent"
+                            ToolTip="{Binding Dashboard.PhoneAudioToolTip}" ToolTipService.ShowOnDisabled="True">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding Dashboard.PhoneVolume, StringFormat={}{0}%}" FontWeight="SemiBold" />
+                        <TextBlock Text="Phone volume" FontWeight="SemiBold" />
+                    </DockPanel>
+                    <Slider Margin="0,12,0,0" Background="{StaticResource RaisedBrush}" Minimum="0" Maximum="100" TickFrequency="1"
+                            IsSnapToTickEnabled="True" SmallChange="1" LargeChange="5"
+                            Value="{Binding Dashboard.PhoneVolume}" AutomationProperties.Name="Phone volume" />
+                </StackPanel>
+
+                <!-- Actions -->
+                <StackPanel Grid.Row="4" Margin="0,18,0,0">
+                    <ToggleButton Style="{StaticResource PrimaryMuteToggle}" IsChecked="{Binding Dashboard.IsMuted}"
+                                  IsEnabled="{Binding Dashboard.IsPhoneAudioAvailable}" AutomationProperties.Name="Mute phone">
+                        <TextBlock>
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="Mute phone" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Dashboard.IsMuted}" Value="True">
+                                            <Setter Property="Text" Value="Unmute phone" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </ToggleButton>
+                    <Button Margin="0,10,0,0" Height="44" Content="Disconnect" Command="{Binding Dashboard.DisconnectCommand}"
+                            Visibility="{Binding Dashboard.IsDisconnectVisible, Converter={StaticResource BoolToVisibility}}" />
+                    <Button Margin="0,10,0,0" Height="44" Content="Connect" Command="{Binding Dashboard.ConnectCommand}"
+                            Visibility="{Binding Dashboard.IsConnectVisible, Converter={StaticResource BoolToVisibility}}" />
+                </StackPanel>
+
+                <!-- Footer -->
+                <Border Grid.Row="5" Margin="0,18,0,0" Padding="0,12,0,0" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="Open DualAudio" Command="{Binding Shell.OpenMainCommand}" Style="{StaticResource LinkButton}" />
+                        <TextBlock Text="{Binding Dashboard.OutputDeviceName}" Style="{StaticResource CaptionText}" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="0,0,12,0" />
+                    </DockPanel>
+                </Border>
+            </Grid>
+        </Border>
+    </tb:TaskbarIcon.TrayPopup>
+</tb:TaskbarIcon>

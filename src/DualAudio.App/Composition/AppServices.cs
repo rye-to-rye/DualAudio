@@ -5,6 +5,8 @@ using DualAudio.App.Views;
 using DualAudio.Core.Abstractions;
 using DualAudio.Core.Audio;
 using DualAudio.Core.Connection;
+using DualAudio.Core.Hotkeys;
+using DualAudio.Core.Startup;
 using DualAudio.Infrastructure;
 using DualAudio.Platform.Windows;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,6 +31,16 @@ public static class AppServices
         services.TryAddSingleton<MainWindow>();
         services.TryAddSingleton<OnboardingViewModel>();
         services.TryAddSingleton<OnboardingWindow>();
+
+        // Tray, hotkeys, settings (Prompt 8).
+        services.TryAddSingleton<IHotkeyService>(sp =>
+            new Win32HotkeyService(Application.Current.Dispatcher, sp.GetService<ILogger<Win32HotkeyService>>()));
+        services.TryAddSingleton<IAppShell>(_ => (IAppShell)Application.Current);
+        services.TryAddSingleton<IConfirmDialog, MessageBoxConfirmDialog>();
+        services.TryAddSingleton<ShellViewModel>();
+        services.TryAddSingleton<TrayViewModel>();
+        services.TryAddSingleton<TrayIcon>();
+        services.TryAddTransient<SettingsViewModel>();
         return services;
     }
 
@@ -55,6 +67,8 @@ public static class AppServices
             sp.GetRequiredService<IClock>(),
             sp.GetRequiredService<PhoneAudioOptions>(),
             sp.GetRequiredService<ILogger<PhoneAudioService>>()));
+        services.TryAddSingleton<HotkeyManager>();
+        services.TryAddSingleton<AutoStartRegistration>();
         return services;
     }
 }

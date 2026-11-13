@@ -45,6 +45,21 @@ public sealed record AppSettings
     /// </summary>
     public bool OnboardingCompleted { get; init; }
 
+    /// <summary>Set once the one-off "DualAudio is still running in the tray" notification has been shown.</summary>
+    public bool TrayNoticeShown { get; init; }
+
+    /// <summary>The binding for <paramref name="action"/>: the saved one, else the default; null if neither exists.</summary>
+    public HotkeyBinding? HotkeyFor(HotkeyAction action) =>
+        Hotkeys?.FirstOrDefault(h => h?.Action == action) ?? DefaultHotkeys.FirstOrDefault(h => h.Action == action);
+
+    /// <summary>Replaces (or adds) the binding for <paramref name="binding"/>'s action; other bindings are kept.</summary>
+    public AppSettings WithHotkey(HotkeyBinding binding)
+    {
+        ArgumentNullException.ThrowIfNull(binding);
+        var others = (Hotkeys ?? DefaultHotkeys).Where(h => h is not null && h.Action != binding.Action);
+        return this with { Hotkeys = [.. others, binding] };
+    }
+
     /// <summary>Longest nickname kept; longer input is cut.</summary>
     public const int MaxNicknameLength = 40;
 

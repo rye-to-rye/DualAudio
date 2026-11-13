@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DualAudio · Settings (minimal)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#7c9cff}a:hover{color:#9db5ff}
+input[type=text]:focus-visible,button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+</style>
+</helmet>
+<div style="--acc: {{accent}}; width: 960px; height: 640px; box-sizing: border-box; display: flex; flex-direction: column; background: #0b0d10; color: #e8eaed; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif">
+
+  <header style="height: 60px; flex-shrink: 0; display: flex; align-items: center; gap: 12px; padding: 0 24px; border-bottom: 1px solid #2a2f38">
+    <button aria-label="Back to dashboard" style="width: 36px; height: 36px; border-radius: 10px; border: 1px solid #2a2f38; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M12 4 L6 10 L12 16" stroke="#e8eaed" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <h1 style="margin: 0; font-size: 18px; font-weight: 700">Settings</h1>
+  </header>
+
+  <div style="flex-grow: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 24px; min-height: 0">
+    <div style="display: flex; flex-direction: column; gap: 16px; min-width: 0">
+      <section style="background: #14171c; border: 1px solid #2a2f38; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+        <h2 style="margin: 0; font-size: 15px; font-weight: 600">General</h2>
+        <label style="display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; cursor: pointer">Start with Windows (in the tray)<input type="checkbox" checked style="width: 18px; height: 18px; accent-color: {{accent}}; margin: 0"></label>
+        <label style="display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; cursor: pointer">Connect to my saved phone on start<input type="checkbox" checked style="width: 18px; height: 18px; accent-color: {{accent}}; margin: 0"></label>
+        <label style="display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; cursor: pointer">Closing the window keeps DualAudio in the tray<input type="checkbox" checked style="width: 18px; height: 18px; accent-color: {{accent}}; margin: 0"></label>
+      </section>
+
+      <section style="flex-grow: 1; background: #14171c; border: 1px solid #2a2f38; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+        <h2 style="margin: 0; font-size: 15px; font-weight: 600">Phone</h2>
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <span style="font-size: 15px; font-weight: 600">Shlawg</span>
+          <span style="font-size: 13px; color: #a9b0bb">Saved phone · paired in Windows</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <label for="snick" style="font-size: 14px">Nickname</label>
+          <input id="snick" type="text" value="My phone" style="height: 40px; box-sizing: border-box; padding: 0 12px; border-radius: 10px; border: 1px solid #2a2f38; background: #0b0d10; color: #e8eaed; font: inherit; font-size: 14px">
+        </div>
+        <div style="flex-grow: 1"></div>
+        <div style="display: flex; align-items: center; gap: 12px">
+          <button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid #2a2f38; background: transparent; color: #e8eaed; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Forget in DualAudio</button>
+          <span style="font-size: 12px; color: #a9b0bb">Stays paired in Windows</span>
+        </div>
+      </section>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 16px; min-width: 0">
+      <section style="background: #14171c; border: 1px solid #2a2f38; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+        <h2 style="margin: 0 0 2px; font-size: 15px; font-weight: 600">Shortcuts</h2>
+        <div style="display: flex; align-items: center; gap: 12px; font-size: 14px"><span style="flex-grow: 1">Mute phone</span><button style="min-width: 148px; height: 36px; border-radius: 8px; border: 1px solid #2a2f38; background: #0b0d10; color: #e8eaed; font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 13px; cursor: pointer">Ctrl + Alt + M</button></div>
+        <div style="display: flex; align-items: center; gap: 12px; font-size: 14px"><span style="flex-grow: 1">Volume up 5%</span><button style="min-width: 148px; height: 36px; border-radius: 8px; border: 1px solid #2a2f38; background: #0b0d10; color: #e8eaed; font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 13px; cursor: pointer">Ctrl + Alt + PgUp</button></div>
+        <div style="display: flex; align-items: center; gap: 12px; font-size: 14px"><span style="flex-grow: 1">Volume down 5%</span><button style="min-width: 148px; height: 36px; border-radius: 8px; border: 1px solid {{conflictBorder}}; background: #0b0d10; color: #e8eaed; font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 13px; cursor: pointer">{{downKey}}</button></div>
+        <sc-if value="{{showConflict}}" hint-placeholder-val="{{false}}">
+          <span style="font-size: 13px; color: #f5c062">Shortcut in use by another app. Kept Ctrl + Alt + PgDn.</span>
+        </sc-if>
+        <span style="font-size: 12px; color: #a9b0bb">Click a shortcut, then press the new keys.</span>
+      </section>
+
+      <section style="flex-grow: 1; background: #14171c; border: 1px solid #2a2f38; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+        <h2 style="margin: 0 0 2px; font-size: 15px; font-weight: 600">About</h2>
+        <span style="font-size: 14px">DualAudio <span style="color: #a9b0bb">version [x.y.z]</span></span>
+        <a href="#" style="font-size: 14px; font-weight: 600; text-decoration: none">Open log folder</a>
+        <a href="#" style="font-size: 14px; font-weight: 600; text-decoration: none">Open-source licenses</a>
+        <div style="flex-grow: 1"></div>
+        <button style="align-self: flex-start; height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid #2a2f38; background: transparent; color: #e8eaed; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Reset settings…</button>
+      </section>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"showConflict":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#7c9cff","options":["#7c9cff","#5ec8b0","#e8eaed"]},"$preview":{"width":960,"height":640}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#7c9cff';
+    const showConflict = this.props.showConflict ?? false;
+    return {
+      accent, showConflict,
+      conflictBorder: showConflict ? '#f5c062' : '#2a2f38',
+      downKey: showConflict ? 'Ctrl + Alt + F9' : 'Ctrl + Alt + PgDn'
+    };
+  }
+}
+</script>
+</body>
+</html>

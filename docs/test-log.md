@@ -124,7 +124,7 @@ Logs: `%LOCALAPPDATA%\DualAudio\logs\dualaudio-<date>.log`. Settings: `%LOCALAPP
 | 14 | Add a phone / per-app output | Click both buttons | Settings > Bluetooth & devices / App volume and device preferences open | | |
 | 15 | UI never freezes | Throughout | Window stays responsive in every step | | |
 
-**MVP status:** NOT YET ACCEPTED (fill in the table above).
+**MVP status:** ACCEPTED 2026-11-13 (Ryan: all hardware checks passed). Note: row 13 is superseded by Prompt 8 — closing the window now hides to the tray; Exit is in the tray menu.
 
 ## First run + auto-connect acceptance (Prompt 7)
 
@@ -148,4 +148,41 @@ Settings: `%LOCALAPPDATA%\DualAudio\settings.json`. Log lines to look for are in
 | 14 | Calm give-up | Leave phone Bluetooth off > ~4 min | Grey "Phone not found" panel with Retry (no red banner); Retry after turning phone BT on connects | | |
 | 15 | Forget in DualAudio | Select the saved phone, **Forget in DualAudio** | "(saved)" and nickname gone; still connected; phone still paired in Windows Settings; next launch shows onboarding **with** Skip | | |
 
-**Status:** NOT YET ACCEPTED.
+**Status:** ACCEPTED 2026-11-13 (Ryan: all hardware checks passed, incl. PC name RYELAPTOP and phone-BT-off auto-reconnect in ~3-5 s).
+
+## Tray, hotkeys, start with Windows (Prompt 8)
+
+Shortcuts (defaults): **Ctrl+Alt+M** mute phone audio, **Ctrl+Alt+PgUp / PgDn** phone volume ±5 %.
+Feedback is the tray tooltip only (hover the icon); nothing may pop up over a game.
+
+| # | Check | How | Expected | Pass/Fail | Notes |
+|---|-------|-----|----------|-----------|-------|
+| 1 | Close hides to tray | Connected + playing, close the window (X) | Window gone, tray icon stays, phone audio keeps playing; first time only: notification "DualAudio is still running" | | |
+| 2 | Notice only once | Open from tray, close again; restart, close again | No notification either time | | |
+| 3 | Tooltip | Hover the tray icon while connected / playing / muted / disconnected | "DualAudio — Connected to <nickname>", "Receiving audio", "Phone muted", "Disconnected" (+ "Phone volume N%") | | |
+| 4 | Flyout | Left-click the tray icon | Flyout near the tray: status, volume slider, Mute, Connect/Disconnect, all working | | |
+| 5 | Tray menu | Right-click: Disconnect, Connect, Mute (check mark), Open DualAudio, Settings | Each does what it says | | |
+| 6 | Exit | Right-click → Exit | Phone audio returns to the phone; tray icon disappears; process gone in Task Manager; log ends with `Shutdown complete` | | |
+| 7 | Second launch | Start DualAudio again while it runs in the tray | The existing dashboard opens; no second tray icon | | |
+| 8 | Valorant, borderless | Play phone audio + game; press Ctrl+Alt+M, then PgUp/PgDn | Only phone audio mutes / changes; game audio unchanged; game keeps focus, no window | | anti-cheat blocked? |
+| 9 | Valorant, fullscreen | Same as 8 | Same as 8 | | |
+| 10 | CS2, borderless | Same as 8 | Same as 8 | | |
+| 11 | CS2, fullscreen | Same as 8 | Same as 8 | | |
+| 12 | Change a shortcut | Settings → Mute → Change → press Ctrl+Alt+U | Shows Ctrl+Alt+U; Ctrl+Alt+M no longer mutes; Ctrl+Alt+U does | | |
+| 13 | Shortcut in use | Register a combo in another app (e.g. a global shortcut in Discord/OBS), record the same combo in DualAudio | "Shortcut in use by another app"; previous shortcut still works | | app used: |
+| 14 | Start with Windows | Settings → turn on; check `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value `DualAudio` | `"<path>\DualAudio.exe" --minimized` | | |
+| 15 | Reboot | Reboot with the setting on and a saved phone | DualAudio in the tray, no window; phone auto-connects; audio plays | | |
+| 16 | Moved exe | Copy the app to another folder, start it once from there | Run value now points to the new path | | |
+| 17 | Settings page | Nickname edit, Open log folder, Reset settings (confirm No, then Yes), About | Nickname shows in dashboard + tooltip; log folder opens; No keeps everything, Yes resets (next start shows setup); version + licenses listed | | |
+
+Games or anti-cheat that block the shortcuts: note them here. Do **not** work around a block (no hooks, no input
+injection). RegisterHotKey is handled by Windows itself, not by reading the game's input, so it should keep working
+while a game has focus. Untested so far: a game running as administrator, and anti-cheats that filter input. Note
+what you see.
+
+| Game | Mode | Hotkeys work? | Notes |
+|------|------|---------------|-------|
+| Valorant (Vanguard) | | | |
+| CS2 | | | |
+
+**Status:** ACCEPTED 2026-11-13 (Ryan: all hardware checks passed: tray, flyout, Exit, hotkeys in-game, start with Windows + reboot auto-connect, idle session). Per-game hotkey rows above not filled in individually.

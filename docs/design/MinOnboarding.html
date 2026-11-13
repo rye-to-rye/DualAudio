@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DualAudio · Onboarding (minimal)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#7c9cff}a:hover{color:#9db5ff}
+input[type=text]:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+</style>
+</helmet>
+<div style="--acc: {{accent}}; width: 640px; height: 520px; box-sizing: border-box; display: flex; flex-direction: column; gap: 22px; padding: 28px 32px; background: #0b0d10; color: #e8eaed; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif">
+
+  <div style="display: flex; flex-direction: column; gap: 10px">
+    <span style="font-size: 13px; color: #a9b0bb">Set up DualAudio · Step {{stepNo}} of 4</span>
+    <div style="display: flex; gap: 6px">
+      <sc-for list="{{bars}}" as="b" hint-placeholder-count="4"><span style="flex-grow: 1; height: 4px; border-radius: 2px; background: {{b.bg}}"></span></sc-for>
+    </div>
+  </div>
+
+  <sc-if value="{{isPick}}" hint-placeholder-val="{{true}}">
+    <div style="display: flex; flex-direction: column; gap: 18px; flex-grow: 1">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font-size: 24px; font-weight: 700">Pick your phone</h1>
+        <p style="margin: 0; font-size: 14px; color: #a9b0bb; line-height: 1.5">These are paired devices that can send audio to this PC.</p>
+      </div>
+      <fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px"><legend style="position: absolute; width: 1px; height: 1px; overflow: hidden">Phone</legend>
+        <label style="display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 12px; border: 1px solid {{accent}}; background: #14171c; cursor: pointer">
+          <input type="radio" name="phone" checked style="accent-color: {{accent}}; width: 16px; height: 16px; margin: 0">
+          <span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px; font-weight: 600">Shlawg</span><span style="font-size: 13px; color: #a9b0bb">Paired · ready</span></span>
+        </label>
+      </fieldset>
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <label for="nick" style="font-size: 14px; font-weight: 600">Nickname <span style="font-weight: 400; color: #a9b0bb">(optional, only shown in DualAudio)</span></label>
+        <input id="nick" type="text" placeholder="e.g. My iPhone" style="height: 42px; box-sizing: border-box; padding: 0 12px; border-radius: 10px; border: 1px solid #2a2f38; background: #14171c; color: #e8eaed; font: inherit; font-size: 14px">
+      </div>
+      <a href="#" style="font-size: 13px; font-weight: 600; text-decoration: none">Don't see your phone?</a>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{isPlay}}" hint-placeholder-val="{{false}}">
+    <div style="display: flex; flex-direction: column; gap: 18px; flex-grow: 1">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font-size: 24px; font-weight: 700">Play something on your phone</h1>
+        <p style="margin: 0; font-size: 14px; color: #a9b0bb; line-height: 1.5">Shlawg is connected. Start a video or song: as soon as DualAudio hears it, setup is done.</p>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; padding: 16px; border-radius: 12px; border: 1px solid #2a2f38; background: #14171c">
+        <span style="width: 8px; height: 8px; border-radius: 50%; background: #a9b0bb"></span>
+        <span style="font-size: 14px">Connected · waiting for audio</span>
+      </div>
+      <div style="padding: 16px; border-radius: 12px; border: 1px solid #2a2f38; display: flex; flex-direction: column; gap: 8px">
+        <span style="font-size: 14px; font-weight: 600">Not hearing it?</span>
+        <span style="font-size: 13px; color: #a9b0bb; line-height: 1.5">iPhone: open Control Center, tap the audio output button and choose RYELAPTOP.</span>
+        <span style="font-size: 13px; color: #a9b0bb; line-height: 1.5">Android: tap the output switcher in the media player and choose RYELAPTOP.</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <div style="display: flex; gap: 10px; justify-content: flex-end; padding-top: 16px; border-top: 1px solid #2a2f38">
+    <button style="height: 42px; padding: 0 18px; border-radius: 10px; border: 1px solid #2a2f38; background: transparent; color: #e8eaed; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Back</button>
+    <button style="height: 42px; padding: 0 22px; border-radius: 10px; border: 0; background: {{nextBg}}; color: {{nextFg}}; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">{{nextLabel}}</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"step":{"editor":"enum","default":"pick","options":["pick","play"]},"accent":{"editor":"color","default":"#7c9cff","options":["#7c9cff","#5ec8b0","#e8eaed"]},"$preview":{"width":640,"height":520}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#7c9cff';
+    const step = this.props.step ?? 'pick';
+    const stepNo = step === 'play' ? 4 : 3;
+    const bars = [1, 2, 3, 4].map(i => ({ bg: i <= stepNo ? accent : '#2a2f38' }));
+    const isPlay = step === 'play';
+    return {
+      accent, stepNo, bars, isPick: !isPlay, isPlay,
+      nextLabel: isPlay ? 'Waiting…' : 'Connect',
+      nextBg: isPlay ? '#1b1f26' : accent,
+      nextFg: isPlay ? '#a9b0bb' : '#0b0d10'
+    };
+  }
+}
+</script>
+</body>
+</html>

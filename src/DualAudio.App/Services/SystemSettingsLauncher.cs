@@ -12,6 +12,9 @@ public interface ISystemSettingsLauncher
 
     /// <summary>ms-settings:apps-volume (App volume and device preferences).</summary>
     Task OpenAppVolumeSettingsAsync();
+
+    /// <summary>Opens a folder in File Explorer, creating it first if needed.</summary>
+    Task OpenFolderAsync(string path);
 }
 
 public sealed class SystemSettingsLauncher(BluetoothSettingsLauncher bluetooth, ILogger<SystemSettingsLauncher> logger) : ISystemSettingsLauncher
@@ -39,6 +42,21 @@ public sealed class SystemSettingsLauncher(BluetoothSettingsLauncher bluetooth, 
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Opening {Uri} failed", AppVolumeUri);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task OpenFolderAsync(string path)
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(path);
+            using var process = Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { path }, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Opening the folder failed");
         }
 
         return Task.CompletedTask;

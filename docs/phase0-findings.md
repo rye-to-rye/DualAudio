@@ -124,7 +124,7 @@ Headset Earphone [DEFAULT: Communications]: [15] svchost "Microphone (Shlawg A2D
 
 ## Still to do
 
-- [ ] Reboot check: GUID after `%b` unchanged? new PID?
+- [x] Reboot check: after a reboot with start-with-Windows, the app auto-connected and audio played on the first try (2026-11-13), which suggests the svchost + "A2DP SNK" rule survives a reboot; to confirm, check that phone volume/mute still work right after a reboot (GUID/PID values not recorded)
 - [ ] `diff before after` from a clean (never connected) state
 - [ ] Volume set to 20 % survives disconnect + reconnect?
 - [ ] Latency measurement

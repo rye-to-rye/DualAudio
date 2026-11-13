@@ -10,11 +10,14 @@
     <!-- Program.Main owns startup (single instance + Generic Host), so App.xaml is a plain Page. -->
     <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
     <StartupObject>DualAudio.App.Program</StartupObject>
+    <!-- Required by [LibraryImport] (Win32HotkeyService: RegisterHotKey/UnregisterHotKey); its generated stubs use pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>..\..\branding\DualAudio.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="H.NotifyIcon.Wpf" Version="2.4.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     <PackageReference Include="WPF-UI" Version="4.0.3" />
   </ItemGroup>
@@ -29,9 +32,10 @@
     <InternalsVisibleTo Include="DualAudio.App.Tests" />
   </ItemGroup>
 
-  <!-- Window icons (pack://application:,,,/Assets/DualAudio.ico); the same file as ApplicationIcon. -->
+  <!-- Window icons (pack://application:,,,/DualAudio;component/Assets/DualAudio.ico); the same file as ApplicationIcon. -->
   <ItemGroup>
     <Resource Include="..\..\branding\DualAudio.ico" Link="Assets\DualAudio.ico" />
+    <Resource Include="..\..\branding\DualAudio-muted.ico" Link="Assets\DualAudio-muted.ico" />
   </ItemGroup>
 
 </Project>

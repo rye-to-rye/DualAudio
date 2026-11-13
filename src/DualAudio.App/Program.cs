@@ -1,5 +1,6 @@
 using DualAudio.App.Composition;
 using DualAudio.App.Services;
+using DualAudio.Core.Startup;
 using DualAudio.Infrastructure;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -29,7 +30,8 @@ public static class Program
         // Disposed asynchronously by App during shutdown (coordinator/receiver release is awaited there).
         var host = builder.Build();
 
-        var app = new App(host, instance);
+        // "--minimized" (Start with Windows): straight to the tray, no window unless onboarding is needed.
+        var app = new App(host, instance, startMinimized: AutoStartRegistration.IsMinimized(args));
         app.InitializeComponent();
         return app.Run();
     }

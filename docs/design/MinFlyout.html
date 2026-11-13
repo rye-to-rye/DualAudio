@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DualAudio · Tray flyout (minimal)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#7c9cff}a:hover{color:#9db5ff}
+.fr{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:3px;background:linear-gradient(90deg,var(--acc) 0%,var(--acc) 30%,#2a2f38 30%);outline:none;margin:0}
+.fr::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--acc);border:3px solid #14171c;cursor:pointer}
+.fr::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--acc);border:3px solid #14171c}
+</style>
+</helmet>
+<div style="--acc: {{accent}}; width: 360px; height: 460px; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px; padding: 20px; background: #14171c; border: 1px solid #2a2f38; border-radius: 12px; color: #e8eaed; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif">
+
+  <div style="display: flex; align-items: center; gap: 10px">
+    <svg width="22" height="22" viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="112" fill="#0b0d10"/><path d="M140 116 H244 A140 140 0 0 1 244 396 H140 Z" fill="none" stroke="#e8eaed" stroke-width="48" stroke-linejoin="round"/><rect x="206" y="196" width="36" height="120" rx="18" fill="{{accent}}"/><rect x="270" y="166" width="36" height="180" rx="18" fill="{{accent}}"/></svg>
+    <span style="font-size: 15px; font-weight: 700">DualAudio</span>
+    <div style="flex-grow: 1"></div>
+    <button aria-label="Settings" style="width: 32px; height: 32px; border-radius: 8px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="3" stroke="#a9b0bb" stroke-width="1.6"/><path d="M10 2 V4.5 M10 15.5 V18 M2 10 H4.5 M15.5 10 H18 M4.3 4.3 L6.1 6.1 M13.9 13.9 L15.7 15.7 M4.3 15.7 L6.1 13.9 M13.9 6.1 L15.7 4.3" stroke="#a9b0bb" stroke-width="1.6"/></svg>
+    </button>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 10px; background: #1b1f26">
+    <span style="width: 8px; height: 8px; border-radius: 50%; background: {{accent}}; flex-shrink: 0"></span>
+    <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+      <span style="font-size: 15px; font-weight: 600">Shlawg</span>
+      <span style="font-size: 13px; color: #a9b0bb">Receiving audio</span>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 12px">
+    <div style="display: flex; justify-content: space-between; align-items: baseline">
+      <label for="fvol" style="font-size: 14px; font-weight: 600">Phone volume</label>
+      <span style="font-size: 14px; font-weight: 600">30%</span>
+    </div>
+    <input id="fvol" class="fr" type="range" min="0" max="100" value="30">
+    <div style="display: flex; gap: 3px; height: 8px">
+      <sc-for list="{{segs}}" as="s" hint-placeholder-count="24"><span style="flex-grow: 1; border-radius: 2px; background: {{s.bg}}"></span></sc-for>
+    </div>
+  </div>
+
+  <div style="flex-grow: 1"></div>
+
+  <div style="display: flex; flex-direction: column; gap: 10px">
+    <button aria-pressed="false" style="height: 44px; border-radius: 10px; border: 0; background: {{accent}}; color: #0b0d10; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Mute phone · Ctrl+Alt+M</button>
+    <button style="height: 44px; border-radius: 10px; border: 1px solid #2a2f38; background: transparent; color: #e8eaed; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Disconnect</button>
+  </div>
+
+  <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid #2a2f38">
+    <span style="font-size: 12px; color: #a9b0bb">Headset Earphone</span>
+    <a href="#" style="font-size: 13px; font-weight: 600; text-decoration: none">Open DualAudio</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#7c9cff","options":["#7c9cff","#5ec8b0","#e8eaed"]},"$preview":{"width":360,"height":460}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#7c9cff';
+    const count = 24, lit = 13;
+    const segs = Array.from({ length: count }, (_, i) => ({ bg: i < lit ? accent : '#2a2f38' }));
+    return { accent, segs };
+  }
+}
+</script>
+</body>
+</html>

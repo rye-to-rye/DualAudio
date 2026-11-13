@@ -100,25 +100,38 @@ public sealed class DashboardRememberedPhoneTests
     }
 
     [Fact]
-    public async Task Auto_connect_toggle_is_saved()
+    public async Task Tray_tooltip_follows_connection_audio_mute_and_volume_with_the_nickname()
     {
-        await using var f = await DashboardFixture.CreateAsync(AppSettings.Default with { PhoneVolume = 20 });
-        f.Vm.AutoConnectOnStart.Should().BeTrue();
+        var settings = (AppSettings.Default with { PreferredDeviceId = PhoneId, PhoneVolume = 40 }).WithNickname(PhoneId, "Mine");
+        await using var f = await DashboardFixture.CreateAsync(settings);
+        f.Vm.TrayToolTip.Should().Be("DualAudio — Disconnected");
 
-        f.Vm.AutoConnectOnStart = false;
-        await f.Vm.SettingsPush;
+        await f.H.ConnectFullyAsync();
+        await f.SettleAsync();
+        f.Vm.TrayToolTip.Should().Be("DualAudio — Connected to Mine\nPhone volume 40%");
 
-        f.Store.Current.AutoConnectOnStart.Should().BeFalse();
-        f.Store.Current.PhoneVolume.Should().Be(20);
+        f.H.SetPhoneSession(active: true, peak: 0.2f);
+        await f.AdvanceAsync(TimeSpan.FromMilliseconds(250));
+        f.Vm.TrayToolTip.Should().StartWith("DualAudio — Receiving audio");
+
+        await f.PhoneAudio.SetMutedAsync(true); // e.g. the Ctrl+Alt+M hotkey
+        await f.SettleAsync();
+        f.Vm.TrayToolTip.Should().StartWith("DualAudio — Phone muted");
+
+        await f.PhoneAudio.SetVolumeAsync(45); // e.g. Ctrl+Alt+PgUp
+        await f.SettleAsync();
+        f.Vm.TrayToolTip.Should().EndWith("Phone volume 45%");
     }
 
     [Fact]
-    public async Task Saved_auto_connect_value_is_shown_without_being_written_back()
+    public async Task Reload_picks_up_a_nickname_changed_on_the_settings_page()
     {
-        await using var f = await DashboardFixture.CreateAsync(AppSettings.Default with { AutoConnectOnStart = false });
+        await using var f = await DashboardFixture.CreateAsync(AppSettings.Default with { PreferredDeviceId = PhoneId });
+        await f.Store.SaveAsync(f.Store.Current.WithNickname(PhoneId, "Renamed"), CancellationToken.None);
 
-        f.Vm.AutoConnectOnStart.Should().BeFalse();
-        f.Store.SaveCount.Should().Be(0);
+        await f.Vm.ReloadSettingsAsync();
+
+        f.Vm.Devices.Single().DisplayName.Should().Be("Renamed (saved)");
     }
 
     [Fact]

@@ -5,147 +5,377 @@
                  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  xmlns:vm="clr-namespace:DualAudio.App.ViewModels"
-                 xmlns:views="clr-namespace:DualAudio.App.Views"
+                 xmlns:conn="clr-namespace:DualAudio.Core.Connection;assembly=DualAudio.Core"
+                 xmlns:errors="clr-namespace:DualAudio.Core.Errors;assembly=DualAudio.Core"
                  mc:Ignorable="d"
                  d:DataContext="{d:DesignInstance Type=vm:DashboardViewModel}"
                  Title="DualAudio"
-                 Width="480" Height="680" MinWidth="420" MinHeight="520"
-                 Icon="pack://application:,,,/Assets/DualAudio.ico"
+                 Width="960" Height="640" MinWidth="780" MinHeight="560"
+                 Icon="pack://application:,,,/DualAudio;component/Assets/DualAudio.ico"
                  WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
-                 WindowBackdropType="Mica"
+                 WindowBackdropType="None"
                  WindowCornerPreference="Round">
     <ui:FluentWindow.Resources>
-        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
-        <views:StatusKindToBrushConverter x:Key="StatusBrush" />
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/DualAudio;component/Themes/Controls.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        </ResourceDictionary>
     </ui:FluentWindow.Resources>
 
-    <Grid>
+    <Grid Background="{StaticResource BackgroundBrush}" TextElement.Foreground="{StaticResource TextBrush}"
+          TextElement.FontFamily="{StaticResource UiFont}" TextElement.FontSize="{StaticResource BodyFontSize}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <ui:TitleBar Grid.Row="0" Title="DualAudio" ShowMaximize="False" />
-
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="20,4,20,20">
-
-                <!-- Status pill -->
-                <Border HorizontalAlignment="Left" CornerRadius="14" Padding="14,6"
-                        Background="{Binding StatusKind, Converter={StaticResource StatusBrush}}"
-                        AutomationProperties.Name="Connection status">
-                    <TextBlock Text="{Binding StatusText}" Foreground="White" FontSize="14" FontWeight="SemiBold" />
-                </Border>
-
-                <!-- Error banner -->
-                <Border Margin="0,12,0,0" Padding="14,12" CornerRadius="6" BorderThickness="1"
-                        BorderBrush="#80C42B1C" Background="#33C42B1C"
-                        Visibility="{Binding IsErrorVisible, Converter={StaticResource BoolToVisibility}}">
-                    <StackPanel>
-                        <TextBlock Text="{Binding Error.Title}" FontWeight="SemiBold" FontSize="15" TextWrapping="Wrap" />
-                        <TextBlock Margin="0,4,0,0" Text="{Binding Error.Message}" TextWrapping="Wrap" Opacity="0.9" />
-                        <ui:Button Margin="0,10,0,0" Content="{Binding Error.ActionLabel}"
-                                   Command="{Binding ErrorActionCommand}"
-                                   Visibility="{Binding HasErrorAction, Converter={StaticResource BoolToVisibility}}" />
-                    </StackPanel>
-                </Border>
-
-                <!-- Phone not found (calm, not an error): auto-connect / reconnect gave up -->
-                <Border Margin="0,12,0,0" Padding="14,12" CornerRadius="6" BorderThickness="1"
-                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-                        Visibility="{Binding IsPhoneNotFound, Converter={StaticResource BoolToVisibility}}">
-                    <StackPanel>
-                        <TextBlock Text="Phone not found" FontWeight="SemiBold" FontSize="15" />
-                        <TextBlock Margin="0,4,0,0" Text="{Binding PhoneNotFoundMessage}" TextWrapping="Wrap" Opacity="0.9" />
-                        <ui:Button Margin="0,10,0,0" Content="Retry" Appearance="Primary" Command="{Binding RetryFindPhoneCommand}" />
-                    </StackPanel>
-                </Border>
-
-                <!-- Phone -->
-                <ui:Card Margin="0,16,0,0">
-                    <StackPanel>
-                        <TextBlock Text="Phone" FontSize="16" FontWeight="SemiBold" />
-                        <ComboBox Margin="0,10,0,0" ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}"
-                                  DisplayMemberPath="DisplayName" AutomationProperties.Name="Phone"
-                                  IsEnabled="{Binding IsConnectVisible}" />
-                        <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
-                            <ui:Button Content="Connect" Appearance="Primary" MinWidth="110"
-                                       Command="{Binding ConnectCommand}"
-                                       Visibility="{Binding IsConnectVisible, Converter={StaticResource BoolToVisibility}}" />
-                            <ui:Button Content="Disconnect" MinWidth="110"
-                                       Command="{Binding DisconnectCommand}"
-                                       Visibility="{Binding IsDisconnectVisible, Converter={StaticResource BoolToVisibility}}" />
-                            <ui:Button Margin="8,0,0,0" Content="Add a phone" Appearance="Secondary"
-                                       Command="{Binding AddPhoneCommand}"
-                                       ToolTip="Pair a phone in Windows Settings &gt; Bluetooth &amp; devices" />
-                        </StackPanel>
-                        <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
-                            <ui:Button Content="Forget in DualAudio" Appearance="Secondary"
-                                       Command="{Binding ForgetDeviceCommand}"
-                                       ToolTip="Removes this phone from DualAudio only. It stays paired in Windows." />
-                        </StackPanel>
-                        <CheckBox Margin="0,10,0,0" Content="Connect to my saved phone when DualAudio starts"
-                                  IsChecked="{Binding AutoConnectOnStart}" />
-                    </StackPanel>
-                </ui:Card>
-
-                <!-- Phone volume -->
-                <ui:Card Margin="0,12,0,0">
-                    <Grid ToolTip="{Binding PhoneAudioToolTip}" ToolTipService.ShowOnDisabled="True" Background="Transparent">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <DockPanel Grid.Row="0">
-                            <Border DockPanel.Dock="Right" Padding="8,2" CornerRadius="4" Background="#A4262C"
-                                    Visibility="{Binding IsMuted, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="Muted" Foreground="White" FontWeight="SemiBold" />
-                            </Border>
-                            <TextBlock Text="Phone volume" FontSize="16" FontWeight="SemiBold" />
-                        </DockPanel>
-                        <DockPanel Grid.Row="1" Margin="0,10,0,0" IsEnabled="{Binding IsPhoneAudioAvailable}">
-                            <ToggleButton DockPanel.Dock="Right" Margin="12,0,0,0" MinWidth="80"
-                                          IsChecked="{Binding IsMuted}" AutomationProperties.Name="Mute phone">
-                                <ToggleButton.Style>
-                                    <Style TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
-                                        <Setter Property="Content" Value="Mute" />
+        <!-- Header (in the caption bar): monogram, name, status pill, Settings -->
+        <Border Grid.Row="0" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" />
+        <ui:TitleBar Grid.Row="0" Height="{StaticResource HeaderHeight}" ShowMaximize="False"
+                     ButtonsForeground="{StaticResource TextMutedBrush}">
+            <ui:TitleBar.Header>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="24,0,0,0">
+                    <Image Source="{StaticResource MonogramImage}" Width="26" Height="26" />
+                    <TextBlock Margin="12,0,0,0" Text="DualAudio" Style="{StaticResource HeaderTitle}" />
+                </StackPanel>
+            </ui:TitleBar.Header>
+            <ui:TitleBar.TrailingContent>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <Border Style="{StaticResource StatusPill}" AutomationProperties.Name="Connection status">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse>
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse" BasedOn="{StaticResource StatusDot}">
                                         <Style.Triggers>
-                                            <Trigger Property="IsChecked" Value="True">
-                                                <Setter Property="Content" Value="Unmute" />
-                                            </Trigger>
+                                            <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:StatusKind.Receiving}">
+                                                <Setter Property="Fill" Value="{StaticResource AccentBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:StatusKind.Connected}">
+                                                <Setter Property="Fill" Value="{StaticResource AccentBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:StatusKind.Error}">
+                                                <Setter Property="Fill" Value="{StaticResource WarningBrush}" />
+                                            </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
-                                </ToggleButton.Style>
-                            </ToggleButton>
-                            <TextBlock DockPanel.Dock="Right" Width="44" Margin="8,0,0,0" VerticalAlignment="Center"
-                                       TextAlignment="Right" Text="{Binding PhoneVolume, StringFormat={}{0}%}" />
-                            <Slider Minimum="0" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True"
-                                    SmallChange="1" LargeChange="10" VerticalAlignment="Center"
-                                    Value="{Binding PhoneVolume}" AutomationProperties.Name="Phone volume" />
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Margin="8,0,0,0" FontSize="{StaticResource SmallFontSize}" FontWeight="SemiBold" VerticalAlignment="Center">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Text" Value="{Binding StatusText}" />
+                                        <Style.Triggers>
+                                            <!-- In Error the pill names the problem ("Bluetooth is off") instead of "Error". -->
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding ConnectionState}" Value="{x:Static conn:ConnectionState.Error}" />
+                                                    <Condition Binding="{Binding IsErrorVisible}" Value="True" />
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Text" Value="{Binding Error.Title}" />
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+                    <!-- Command set in code-behind (ShellViewModel.OpenSettingsCommand). -->
+                    <Button x:Name="SettingsButton" Margin="12,0,0,0" Style="{StaticResource IconButton}"
+                            ToolTip="Settings" AutomationProperties.Name="Settings">
+                        <Viewbox Width="18" Height="18">
+                            <Path Style="{StaticResource Icon}" Data="{StaticResource GearIcon}" />
+                        </Viewbox>
+                    </Button>
+                </StackPanel>
+            </ui:TitleBar.TrailingContent>
+        </ui:TitleBar>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <Grid Margin="{StaticResource WindowPadding}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.45*" />
+                    <ColumnDefinition Width="{StaticResource CardGapLength}" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- ======================== Left column -->
+                <Grid Grid.Column="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" MinHeight="250" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Phone card: icon, name, state line, one action -->
+                    <Border Grid.Row="0" Style="{StaticResource Card}" Margin="{StaticResource CardGapBelow}">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
+                                <!-- Not found: Retry (looks again, with automatic retries) -->
+                                <Button Content="Retry" Command="{Binding RetryFindPhoneCommand}"
+                                        Visibility="{Binding IsPhoneNotFound, Converter={StaticResource BoolToVisibility}}"
+                                        Style="{StaticResource PrimaryButton}" />
+                                <!-- Error with an action: "Open Bluetooth settings" / "Retry" -->
+                                <Button Content="{Binding Error.ActionLabel}" Command="{Binding ErrorActionCommand}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding ConnectionState}" Value="{x:Static conn:ConnectionState.Error}" />
+                                                        <Condition Binding="{Binding HasErrorAction}" Value="True" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <!-- Connect -->
+                                <Button Content="Connect" Command="{Binding ConnectCommand}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding IsConnectVisible}" Value="True" />
+                                                        <Condition Binding="{Binding IsPhoneNotFound}" Value="False" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </MultiDataTrigger>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding ConnectionState}" Value="{x:Static conn:ConnectionState.Error}" />
+                                                        <Condition Binding="{Binding HasErrorAction}" Value="True" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <!-- Disconnect ("Cancel" while reconnecting) -->
+                                <Button Command="{Binding DisconnectCommand}"
+                                        Visibility="{Binding IsDisconnectVisible, Converter={StaticResource BoolToVisibility}}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                            <Setter Property="Content" Value="Disconnect" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ConnectionState}" Value="{x:Static conn:ConnectionState.Disconnected}">
+                                                    <Setter Property="Content" Value="Cancel" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                            </StackPanel>
+
+                            <Border DockPanel.Dock="Left" Width="48" Height="48" Style="{StaticResource Tile}" Padding="0" CornerRadius="{StaticResource CardRadius}">
+                                <Path Width="20" Height="30" Data="{StaticResource PhoneIcon}" Stroke="{StaticResource TextBrush}" StrokeThickness="1.8" />
+                            </Border>
+
+                            <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding SelectedDevice.Name, FallbackValue='No phone yet', TargetNullValue='No phone yet'}"
+                                           FontSize="{StaticResource PhoneNameFontSize}" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Margin="0,4,0,0" FontSize="{StaticResource BodyFontSize}" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="Not connected" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ConnectionState}" Value="{x:Static conn:ConnectionState.Enabling}">
+                                                    <Setter Property="Text" Value="Connecting…" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding ConnectionState}" Value="{x:Static conn:ConnectionState.Opening}">
+                                                    <Setter Property="Text" Value="Connecting…" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding ConnectionState}" Value="{x:Static conn:ConnectionState.WaitingForPhone}">
+                                                    <Setter Property="Text" Value="Waiting for the phone to appear…" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding ConnectionState}" Value="{x:Static conn:ConnectionState.Connected}">
+                                                    <Setter Property="Text" Value="Connected · nothing playing on the phone" />
+                                                </DataTrigger>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding ConnectionState}" Value="{x:Static conn:ConnectionState.Connected}" />
+                                                        <Condition Binding="{Binding IsReceivingAudio}" Value="True" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Text" Value="Connected · receiving audio" />
+                                                </MultiDataTrigger>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding ConnectionState}" Value="{x:Static conn:ConnectionState.Disconnected}" />
+                                                        <Condition Binding="{Binding IsDisconnectVisible}" Value="True" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Text" Value="Lost the link, trying again" />
+                                                </MultiDataTrigger>
+                                                <DataTrigger Binding="{Binding ConnectionState}" Value="{x:Static conn:ConnectionState.Error}">
+                                                    <Setter Property="Text" Value="Saved phone" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsPhoneNotFound}" Value="True">
+                                                    <Setter Property="Text" Value="Saved phone · not reachable" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
                         </DockPanel>
-                    </Grid>
-                </ui:Card>
+                    </Border>
 
-                <!-- Output -->
-                <ui:Card Margin="0,12,0,0">
-                    <StackPanel>
-                        <TextBlock Text="Output" FontSize="16" FontWeight="SemiBold" />
-                        <TextBlock Margin="0,8,0,0" TextWrapping="Wrap">
-                            <Run Text="Phone audio plays on" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                            <LineBreak />
-                            <Run Text="{Binding OutputDeviceName, Mode=OneWay}" FontWeight="SemiBold" />
-                        </TextBlock>
-                        <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" FontSize="12"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                   Text="DualAudio follows the Windows default output. Change it in Sound settings or per app." />
-                        <ui:Button Margin="0,10,0,0" Content="Per-app output settings"
-                                   Command="{Binding OpenPerAppOutputSettingsCommand}" />
+                    <!-- Banners: error (incl. "Can't reach your phone" while retrying) and the calm "Phone not found" -->
+                    <StackPanel Grid.Row="1">
+                        <Border Style="{StaticResource Card}" Padding="16,14" Margin="{StaticResource CardGapBelow}"
+                                Visibility="{Binding IsErrorVisible, Converter={StaticResource BoolToVisibility}}">
+                            <DockPanel>
+                                <Viewbox DockPanel.Dock="Left" Width="18" Height="18" VerticalAlignment="Top" Margin="0,1,12,0">
+                                    <Path Data="{StaticResource InfoIcon}">
+                                        <Path.Style>
+                                            <Style TargetType="Path" BasedOn="{StaticResource Icon}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Error.Kind}" Value="{x:Static errors:ErrorKind.BluetoothOff}">
+                                                        <Setter Property="Stroke" Value="{StaticResource WarningBrush}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Error.Kind}" Value="{x:Static errors:ErrorKind.NoAdapter}">
+                                                        <Setter Property="Stroke" Value="{StaticResource WarningBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Path.Style>
+                                    </Path>
+                                </Viewbox>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Error.Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Margin="0,4,0,0" Text="{Binding Error.Message}" Style="{StaticResource MutedText}" />
+                                    <!-- While retrying the card shows Cancel; "Retry now" stays available here. -->
+                                    <Button Margin="0,8,0,0" Content="{Binding Error.ActionLabel}" Command="{Binding ErrorActionCommand}">
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource LinkButton}">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding ConnectionState}" Value="{x:Static conn:ConnectionState.Disconnected}" />
+                                                            <Condition Binding="{Binding HasErrorAction}" Value="True" />
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Padding="16,14" Margin="{StaticResource CardGapBelow}"
+                                Visibility="{Binding IsPhoneNotFound, Converter={StaticResource BoolToVisibility}}">
+                            <DockPanel>
+                                <Viewbox DockPanel.Dock="Left" Width="18" Height="18" VerticalAlignment="Top" Margin="0,1,12,0">
+                                    <Path Style="{StaticResource Icon}" Data="{StaticResource InfoIcon}" />
+                                </Viewbox>
+                                <StackPanel>
+                                    <TextBlock Text="Phone not found" FontWeight="SemiBold" />
+                                    <TextBlock Margin="0,4,0,0" Text="{Binding PhoneNotFoundMessage}" Style="{StaticResource MutedText}" />
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
                     </StackPanel>
-                </ui:Card>
 
-            </StackPanel>
+                    <!-- Phone volume -->
+                    <Border Grid.Row="2" Style="{StaticResource Card}">
+                        <Grid IsEnabled="{Binding IsPhoneAudioAvailable}" Background="Transparent"
+                              ToolTip="{Binding PhoneAudioToolTip}" ToolTipService.ShowOnDisabled="True">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <DockPanel Grid.Row="0">
+                                <TextBlock DockPanel.Dock="Right" Text="Game audio is never changed" Style="{StaticResource MutedText}" VerticalAlignment="Bottom" />
+                                <TextBlock Text="Phone volume" Style="{StaticResource CardHeading}" />
+                            </DockPanel>
+                            <DockPanel Grid.Row="1" Margin="0,18,0,0">
+                                <TextBlock DockPanel.Dock="Left" Width="92" Margin="0,0,20,0" Style="{StaticResource BigNumber}" VerticalAlignment="Center">
+                                    <Run Text="{Binding PhoneVolume, Mode=OneWay}" /><Run Text="%" FontSize="18" Foreground="{StaticResource TextMutedBrush}" />
+                                </TextBlock>
+                                <Slider Minimum="0" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True" SmallChange="1" LargeChange="5"
+                                        VerticalAlignment="Center" Value="{Binding PhoneVolume}" AutomationProperties.Name="Phone volume" />
+                            </DockPanel>
+                            <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,18,0,0">
+                                <ToggleButton Style="{StaticResource MuteToggle}" IsChecked="{Binding IsMuted}" AutomationProperties.Name="Mute phone">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Viewbox Width="16" Height="16" Margin="0,0,8,0">
+                                            <Path Data="{StaticResource MuteIcon}">
+                                                <Path.Style>
+                                                    <Style TargetType="Path" BasedOn="{StaticResource Icon}">
+                                                        <Setter Property="Stroke" Value="{StaticResource TextBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsMuted}" Value="True">
+                                                                <Setter Property="Data" Value="{StaticResource SpeakerIcon}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Path.Style>
+                                            </Path>
+                                        </Viewbox>
+                                        <TextBlock VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Text" Value="Mute phone" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsMuted}" Value="True">
+                                                            <Setter Property="Text" Value="Unmute phone" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </ToggleButton>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <!-- ======================== Right column -->
+                <Grid Grid.Column="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource Card}" Margin="{StaticResource CardGapBelow}">
+                        <StackPanel>
+                            <TextBlock Text="Output" Style="{StaticResource CardHeading}" Margin="0,0,0,12" />
+                            <TextBlock Text="{Binding OutputDeviceName}" FontSize="{StaticResource CardHeadingFontSize}" TextWrapping="Wrap" />
+                            <TextBlock Margin="0,6,0,0" Text="Windows default · phone audio follows it" Style="{StaticResource MutedText}" />
+                            <Button Margin="0,12,0,0" Content="Per-app output settings" Command="{Binding OpenPerAppOutputSettingsCommand}"
+                                    Style="{StaticResource LinkButton}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Phone choice (kept from the previous dashboard; the mockup has no picker) -->
+                    <Border Grid.Row="1" Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="Phones" Style="{StaticResource CardHeading}" Margin="0,0,0,12" />
+                            <ComboBox ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}" DisplayMemberPath="DisplayName"
+                                      AutomationProperties.Name="Phone" IsEnabled="{Binding IsConnectVisible}" />
+                            <StackPanel Margin="0,14,0,0" Orientation="Horizontal">
+                                <Button Content="Add a phone" Command="{Binding AddPhoneCommand}" Style="{StaticResource LinkButton}"
+                                        ToolTip="Pair a phone in Windows Settings &gt; Bluetooth &amp; devices" />
+                                <Button Margin="20,0,0,0" Content="Forget in DualAudio" Command="{Binding ForgetDeviceCommand}" Style="{StaticResource LinkButton}"
+                                        ToolTip="Removes this phone from DualAudio only. It stays paired in Windows." />
+                            </StackPanel>
+                            <TextBlock Margin="0,10,0,0" Text="Forget only removes it from DualAudio; it stays paired in Windows." Style="{StaticResource CaptionText}" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Grid>
         </ScrollViewer>
     </Grid>
 </ui:FluentWindow>

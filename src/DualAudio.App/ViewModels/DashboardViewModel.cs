@@ -76,9 +76,9 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
     [NotifyCanExecuteChangedFor(nameof(ConnectCommand), nameof(ForgetDeviceCommand))]
     private DeviceItem? selectedDevice;
 
-    /// <summary>Mirrors <c>AppSettings.AutoConnectOnStart</c>; changing it is saved right away.</summary>
+    /// <summary>Tray tooltip (see <see cref="TrayStatus"/>): the only feedback for hotkeys.</summary>
     [ObservableProperty]
-    private bool autoConnectOnStart = true;
+    private string trayToolTip = TrayStatus.Prefix + "Disconnected";
 
     /// <summary>Calm "Phone not found — Retry" panel: the coordinator gave up on its own (no error banner).</summary>
     [ObservableProperty]
@@ -141,31 +141,13 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
     /// <summary>Test hook: the latest mute push.</summary>
     internal Task MutePush { get; private set; } = Task.CompletedTask;
 
-    /// <summary>Test hook: the latest settings write (remember phone, forget, auto-connect toggle).</summary>
+    /// <summary>Test hook: the latest settings write (remember phone, forget).</summary>
     internal Task SettingsPush { get; private set; } = Task.CompletedTask;
 
     /// <summary>Loads the remembered phone and the current output device. Call once, on the UI thread.</summary>
     public async Task InitializeAsync()
     {
-        try
-        {
-            var settings = await Task.Run(() => _settings.LoadAsync(CancellationToken.None));
-            _preferredDeviceId = settings.PreferredDeviceId;
-            _nicknames = settings.DeviceNicknames;
-            _applyingServiceState = true;
-            try
-            {
-                AutoConnectOnStart = settings.AutoConnectOnStart;
-            }
-            finally
-            {
-                _applyingServiceState = false;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Loading settings for the dashboard failed");
-        }
+        await LoadSettingsAsync();
 
         // From now on a successful connection is remembered. Not before: while onboarding runs, only onboarding
         // saves the phone, and only once audio actually arrives.
@@ -269,14 +251,26 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         return RunSafeAsync(() => _coordinator.AutoConnectAsync(id), "retry finding phone");
     }
 
-    partial void OnAutoConnectOnStartChanged(bool value)
+    /// <summary>Re-reads the saved phone and nicknames after the settings page changed them (UI thread).</summary>
+    public async Task ReloadSettingsAsync()
     {
-        if (_applyingServiceState)
-        {
-            return;
-        }
+        await LoadSettingsAsync();
+        RefreshDevices();
+        ApplyConnectionState();
+    }
 
-        SettingsPush = UpdateSettingsAsync(s => s with { AutoConnectOnStart = value }, "save auto-connect");
+    private async Task LoadSettingsAsync()
+    {
+        try
+        {
+            var settings = await Task.Run(() => _settings.LoadAsync(CancellationToken.None));
+            _preferredDeviceId = settings.PreferredDeviceId;
+            _nicknames = settings.DeviceNicknames;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Loading settings for the dashboard failed");
+        }
     }
 
     private bool CanDisconnect() => IsDisconnectVisible && !IsTransitioning;
@@ -488,6 +482,18 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
     private void UpdateStatus()
     {
         var status = DashboardStatus.From(ConnectionState, _coordinator.IsReconnecting, IsReceivingAudio, IsMuted, _coordinator.GaveUp);
+        var activeId = _coordinator.ActiveDevice?.Id;
+        var phoneName = Devices.FirstOrDefault(d => string.Equals(d.Id, activeId, StringComparison.OrdinalIgnoreCase))?.Name
+                        ?? _coordinator.ActiveDevice?.Name;
+        TrayToolTip = TrayStatus.ToolTip(
+            ConnectionState,
+            _coordinator.IsReconnecting,
+            _coordinator.GaveUp,
+            _coordinator.LastError,
+            IsReceivingAudio,
+            IsMuted,
+            phoneName,
+            PhoneVolume);
         StatusKind = status.Kind;
         StatusText = status.Text;
     }
